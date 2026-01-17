@@ -6,7 +6,7 @@ use std::fs;
 use std::path::Path;
 
 // Built-in template constants
-const DAILY_TEMPLATE: &str = "# {DATE}\n\n## Morning\n\n\n## Afternoon\n\n\n## Evening\n\n";
+const DAILY_TEMPLATE: &str = "# {DATE}\n\n";
 const WEEKLY_TEMPLATE: &str = "# Week {WEEK_NUMBER}, {YEAR}\n\n## Monday\n\n\n## Tuesday\n\n\n## Wednesday\n\n\n## Thursday\n\n\n## Friday\n\n\n## Weekend\n\n";
 const MONTHLY_TEMPLATE: &str =
     "# {MONTH} {YEAR}\n\n## Week 1\n\n\n## Week 2\n\n\n## Week 3\n\n\n## Week 4\n\n";
@@ -98,9 +98,7 @@ mod tests {
     fn test_load_builtin_daily() {
         let template = Template::from_builtin("daily.md").unwrap();
         assert!(template.content.contains("# {DATE}"));
-        assert!(template.content.contains("## Morning"));
-        assert!(template.content.contains("## Afternoon"));
-        assert!(template.content.contains("## Evening"));
+        assert!(!template.content.contains("## Morning"));
     }
 
     #[test]
@@ -209,8 +207,7 @@ mod tests {
 
         // No custom template, should load built-in
         let template = load_template(temp.path(), "daily.md").unwrap();
-        assert!(template.content.contains("## Morning"));
-        assert!(template.content.contains("## Afternoon"));
+        assert!(template.content.contains("# {DATE}"));
     }
 
     #[test]

@@ -1,9 +1,12 @@
+use chrono::NaiveDate;
 use clap::Parser;
-use djour::application::{init::InitService, manage_config::ConfigService, OpenNoteService};
-use djour::cli::{Cli, Commands};
+use djour::application::{
+    init::InitService, manage_config::ConfigService, ListNotesService, OpenNoteService,
+};
+use djour::cli::{format_note_list, Cli, Commands};
 use djour::domain::JournalMode;
 use djour::error::DjourError;
-use djour::infrastructure::FileSystemRepository;
+use djour::infrastructure::{FileSystemRepository, JournalRepository};
 use std::str::FromStr;
 
 fn main() {
@@ -59,6 +62,40 @@ fn run(cli: Cli) -> Result<(), DjourError> {
                 println!("Valid keys: mode, editor, created");
                 Ok(())
             }
+        }
+        Some(Commands::List { from, to, limit }) => {
+            // Discover repository
+            let repo = FileSystemRepository::discover()?;
+            let config = repo.load_config()?;
+
+            // Parse date strings
+            let from_date = if let Some(s) = from {
+                Some(
+                    NaiveDate::parse_from_str(&s, "%Y-%m-%d")
+                        .map_err(|_| DjourError::Config(format!("Invalid date format: {}", s)))?,
+                )
+            } else {
+                None
+            };
+
+            let to_date = if let Some(s) = to {
+                Some(
+                    NaiveDate::parse_from_str(&s, "%Y-%m-%d")
+                        .map_err(|_| DjourError::Config(format!("Invalid date format: {}", s)))?,
+                )
+            } else {
+                None
+            };
+
+            // Execute list
+            let service = ListNotesService::new(repo);
+            let notes = service.execute(config.mode, from_date, to_date, Some(limit))?;
+
+            // Format and print output
+            let output = format_note_list(&notes);
+            print!("{}", output);
+
+            Ok(())
         }
         None => {
             // Check if time_ref provided (open command)

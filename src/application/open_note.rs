@@ -103,8 +103,9 @@ mod tests {
         // Verify file was created with template
         assert!(repo.note_exists(&filename));
         let file_content = repo.read_note(&filename).unwrap();
-        assert!(file_content.contains("## Morning"));
-        assert!(file_content.contains("## Afternoon"));
+        // Check that the template was rendered (should have a date heading)
+        assert!(file_content.starts_with("# "));
+        assert!(file_content.contains(&date.format("%B %d, %Y").to_string()));
     }
 
     #[test]

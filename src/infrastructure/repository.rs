@@ -1,9 +1,24 @@
 //! File system repository
 
+use crate::domain::JournalMode;
 use crate::error::{DjourError, Result};
 use crate::infrastructure::Config;
+use chrono::NaiveDate;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+/// Represents a note file with its metadata
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoteEntry {
+    pub filename: String,
+    pub date: Option<NaiveDate>,
+}
+
+impl NoteEntry {
+    pub fn new(filename: String, date: Option<NaiveDate>) -> Self {
+        NoteEntry { filename, date }
+    }
+}
 
 /// Abstract repository for journal operations
 pub trait JournalRepository {
@@ -129,6 +144,79 @@ impl FileSystemRepository {
         }
 
         fs::write(&path, content).map_err(DjourError::Io)
+    }
+
+    /// List all note files for the given mode
+    /// Filters and sorts by date, applying optional date range and limit
+    pub fn list_notes(
+        &self,
+        mode: JournalMode,
+        from: Option<NaiveDate>,
+        to: Option<NaiveDate>,
+        limit: Option<usize>,
+    ) -> Result<Vec<NoteEntry>> {
+        // Read directory entries
+        let entries = fs::read_dir(&self.root)?;
+
+        // Filter for valid note files and parse dates
+        let mut notes: Vec<NoteEntry> = entries
+            .filter_map(|entry| {
+                let entry = entry.ok()?;
+                let path = entry.path();
+
+                // Only process files (not directories)
+                if !path.is_file() {
+                    return None;
+                }
+
+                // Get filename
+                let filename = path.file_name()?.to_str()?.to_string();
+
+                // Only consider .md files
+                if !filename.ends_with(".md") {
+                    return None;
+                }
+
+                // Mode-specific filtering
+                match mode {
+                    JournalMode::Single => {
+                        if filename == "journal.md" {
+                            Some(NoteEntry::new(filename, None))
+                        } else {
+                            None
+                        }
+                    }
+                    _ => {
+                        // Try to parse date from filename
+                        mode.date_from_filename(&filename)
+                            .map(|d| NoteEntry::new(filename, Some(d)))
+                    }
+                }
+            })
+            .collect();
+
+        // Apply date range filters
+        if let Some(from_date) = from {
+            notes.retain(|e| e.date.map_or(true, |d| d >= from_date));
+        }
+        if let Some(to_date) = to {
+            notes.retain(|e| e.date.map_or(true, |d| d <= to_date));
+        }
+
+        // Sort by date descending (newest first)
+        notes.sort_by(|a, b| match (a.date, b.date) {
+            (Some(da), Some(db)) => db.cmp(&da), // Reverse order for descending
+            (Some(_), None) => std::cmp::Ordering::Less, // Dated before undated
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => a.filename.cmp(&b.filename),
+        });
+
+        // Apply limit
+        if let Some(n) = limit {
+            notes.truncate(n);
+        }
+
+        Ok(notes)
     }
 }
 
@@ -331,5 +419,142 @@ mod tests {
         // Verify parent dirs were created
         assert!(temp.path().join("sub").join("dir").exists());
         assert!(temp.path().join("sub").join("dir").join("note.md").exists());
+    }
+
+    #[test]
+    fn test_list_notes_empty() {
+        let temp = TempDir::new().unwrap();
+        let repo = FileSystemRepository::new(temp.path().to_path_buf());
+
+        let notes = repo.list_notes(JournalMode::Daily, None, None, None).unwrap();
+        assert_eq!(notes.len(), 0);
+    }
+
+    #[test]
+    fn test_list_notes_daily() {
+        let temp = TempDir::new().unwrap();
+        let repo = FileSystemRepository::new(temp.path().to_path_buf());
+
+        // Create some note files
+        fs::write(temp.path().join("2025-01-17.md"), "note 1").unwrap();
+        fs::write(temp.path().join("2025-01-16.md"), "note 2").unwrap();
+        fs::write(temp.path().join("2025-01-15.md"), "note 3").unwrap();
+
+        let notes = repo.list_notes(JournalMode::Daily, None, None, None).unwrap();
+
+        assert_eq!(notes.len(), 3);
+        // Should be sorted newest first
+        assert_eq!(notes[0].filename, "2025-01-17.md");
+        assert_eq!(notes[1].filename, "2025-01-16.md");
+        assert_eq!(notes[2].filename, "2025-01-15.md");
+    }
+
+    #[test]
+    fn test_list_notes_ignores_other_files() {
+        let temp = TempDir::new().unwrap();
+        let repo = FileSystemRepository::new(temp.path().to_path_buf());
+
+        // Create note files and other files
+        fs::write(temp.path().join("2025-01-17.md"), "note").unwrap();
+        fs::write(temp.path().join("readme.txt"), "text").unwrap();
+        fs::write(temp.path().join("invalid.md"), "bad").unwrap();
+        fs::create_dir(temp.path().join(".djour")).unwrap();
+
+        let notes = repo.list_notes(JournalMode::Daily, None, None, None).unwrap();
+
+        // Should only include valid daily note
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].filename, "2025-01-17.md");
+    }
+
+    #[test]
+    fn test_list_notes_with_date_range() {
+        let temp = TempDir::new().unwrap();
+        let repo = FileSystemRepository::new(temp.path().to_path_buf());
+
+        fs::write(temp.path().join("2025-01-10.md"), "note").unwrap();
+        fs::write(temp.path().join("2025-01-15.md"), "note").unwrap();
+        fs::write(temp.path().join("2025-01-20.md"), "note").unwrap();
+
+        let from = NaiveDate::from_ymd_opt(2025, 1, 12).unwrap();
+        let to = NaiveDate::from_ymd_opt(2025, 1, 18).unwrap();
+
+        let notes = repo
+            .list_notes(JournalMode::Daily, Some(from), Some(to), None)
+            .unwrap();
+
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].filename, "2025-01-15.md");
+    }
+
+    #[test]
+    fn test_list_notes_with_limit() {
+        let temp = TempDir::new().unwrap();
+        let repo = FileSystemRepository::new(temp.path().to_path_buf());
+
+        fs::write(temp.path().join("2025-01-17.md"), "note").unwrap();
+        fs::write(temp.path().join("2025-01-16.md"), "note").unwrap();
+        fs::write(temp.path().join("2025-01-15.md"), "note").unwrap();
+
+        let notes = repo
+            .list_notes(JournalMode::Daily, None, None, Some(2))
+            .unwrap();
+
+        assert_eq!(notes.len(), 2);
+        // Should get newest 2
+        assert_eq!(notes[0].filename, "2025-01-17.md");
+        assert_eq!(notes[1].filename, "2025-01-16.md");
+    }
+
+    #[test]
+    fn test_list_notes_single_mode() {
+        let temp = TempDir::new().unwrap();
+        let repo = FileSystemRepository::new(temp.path().to_path_buf());
+
+        fs::write(temp.path().join("journal.md"), "note").unwrap();
+        fs::write(temp.path().join("2025-01-17.md"), "other").unwrap();
+
+        let notes = repo.list_notes(JournalMode::Single, None, None, None).unwrap();
+
+        // Should only include journal.md
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].filename, "journal.md");
+        assert_eq!(notes[0].date, None);
+    }
+
+    #[test]
+    fn test_list_notes_weekly_mode() {
+        let temp = TempDir::new().unwrap();
+        let repo = FileSystemRepository::new(temp.path().to_path_buf());
+
+        fs::write(temp.path().join("2025-W03.md"), "week 3").unwrap();
+        fs::write(temp.path().join("2025-W02.md"), "week 2").unwrap();
+        fs::write(temp.path().join("2025-01-17.md"), "daily").unwrap(); // Should be ignored
+
+        let notes = repo.list_notes(JournalMode::Weekly, None, None, None).unwrap();
+
+        // Should only include weekly notes
+        assert_eq!(notes.len(), 2);
+        assert_eq!(notes[0].filename, "2025-W03.md");
+        assert_eq!(notes[1].filename, "2025-W02.md");
+    }
+
+    #[test]
+    fn test_list_notes_monthly_mode() {
+        let temp = TempDir::new().unwrap();
+        let repo = FileSystemRepository::new(temp.path().to_path_buf());
+
+        fs::write(temp.path().join("2025-01.md"), "jan").unwrap();
+        fs::write(temp.path().join("2024-12.md"), "dec").unwrap();
+        fs::write(temp.path().join("2025-01-17.md"), "daily").unwrap(); // Should be ignored
+
+        let notes = repo
+            .list_notes(JournalMode::Monthly, None, None, None)
+            .unwrap();
+
+        // Should only include monthly notes
+        assert_eq!(notes.len(), 2);
+        assert_eq!(notes[0].filename, "2025-01.md");
+        assert_eq!(notes[1].filename, "2024-12.md");
     }
 }

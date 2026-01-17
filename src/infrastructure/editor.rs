@@ -17,7 +17,7 @@ impl EditorSession {
         }
     }
 
-    /// Open a file in the editor and wait for it to close
+    /// Open a file in the editor and return immediately
     pub fn open(&self, file_path: &Path) -> Result<()> {
         let (program, args) = self.parse_command();
 
@@ -27,30 +27,23 @@ impl EditorSession {
 
         // On Windows, use cmd /c to ensure .bat and .cmd files are found
         #[cfg(windows)]
-        let status = {
+        {
             let mut cmd = Command::new("cmd");
             cmd.arg("/C").arg(&program).args(&all_args);
-            cmd.status().map_err(|e| {
+            cmd.spawn().map_err(|e| {
                 DjourError::Editor(format!("Failed to launch editor '{}': {}", program, e))
-            })?
-        };
+            })?;
+        }
 
         // On Unix, use the program directly
         #[cfg(not(windows))]
-        let status = Command::new(&program)
-            .args(&all_args)
-            .status()
-            .map_err(|e| {
-                DjourError::Editor(format!("Failed to launch editor '{}': {}", program, e))
-            })?;
-
-        // Note: Some editors return non-zero exit codes even on success
-        // We only fail on actual launch failures
-        if !status.success() {
-            eprintln!(
-                "Warning: Editor exited with non-zero status: {:?}",
-                status.code()
-            );
+        {
+            Command::new(&program)
+                .args(&all_args)
+                .spawn()
+                .map_err(|e| {
+                    DjourError::Editor(format!("Failed to launch editor '{}': {}", program, e))
+                })?;
         }
 
         Ok(())

@@ -41,4 +41,19 @@ pub enum Commands {
         #[arg(short, long)]
         list: bool,
     },
+
+    /// List existing notes
+    List {
+        /// Start date (inclusive, format: YYYY-MM-DD)
+        #[arg(long)]
+        from: Option<String>,
+
+        /// End date (inclusive, format: YYYY-MM-DD)
+        #[arg(long)]
+        to: Option<String>,
+
+        /// Maximum number of entries to show
+        #[arg(long, default_value = "10")]
+        limit: usize,
+    },
 }

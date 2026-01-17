@@ -46,6 +46,42 @@ impl JournalMode {
             JournalMode::Single => "entry.md",
         }
     }
+
+    /// Parse a filename and extract the date it represents
+    /// Returns None if the filename doesn't match this mode's pattern
+    pub fn date_from_filename(&self, filename: &str) -> Option<NaiveDate> {
+        let stem = filename.strip_suffix(".md")?;
+
+        match self {
+            JournalMode::Daily => {
+                // Parse YYYY-MM-DD
+                NaiveDate::parse_from_str(stem, "%Y-%m-%d").ok()
+            }
+            JournalMode::Weekly => {
+                // Parse YYYY-Www (e.g., "2025-W03")
+                let parts: Vec<&str> = stem.split('-').collect();
+                if parts.len() != 2 || !parts[1].starts_with('W') {
+                    return None;
+                }
+
+                let year: i32 = parts[0].parse().ok()?;
+                let week_str = &parts[1][1..]; // Skip 'W'
+                let week: u32 = week_str.parse().ok()?;
+
+                // Get first day (Monday) of ISO week
+                NaiveDate::from_isoywd_opt(year, week, chrono::Weekday::Mon)
+            }
+            JournalMode::Monthly => {
+                // Parse YYYY-MM and use first day of month
+                let date_str = format!("{}-01", stem);
+                NaiveDate::parse_from_str(&date_str, "%Y-%m-%d").ok()
+            }
+            JournalMode::Single => {
+                // journal.md doesn't have a specific date
+                None
+            }
+        }
+    }
 }
 
 impl FromStr for JournalMode {
@@ -164,5 +200,76 @@ mod tests {
         let err = JournalMode::from_str("invalid").unwrap_err();
         assert!(err.contains("Invalid mode"));
         assert!(err.contains("daily, weekly, monthly, single"));
+    }
+
+    #[test]
+    fn test_date_from_filename_daily() {
+        let mode = JournalMode::Daily;
+        let date = mode.date_from_filename("2025-01-17.md").unwrap();
+        assert_eq!(date, NaiveDate::from_ymd_opt(2025, 1, 17).unwrap());
+    }
+
+    #[test]
+    fn test_date_from_filename_daily_invalid() {
+        let mode = JournalMode::Daily;
+        assert!(mode.date_from_filename("2025-W03.md").is_none());
+        assert!(mode.date_from_filename("invalid.md").is_none());
+        assert!(mode.date_from_filename("2025-01-17.txt").is_none());
+        assert!(mode.date_from_filename("2025-01-17").is_none()); // No .md extension
+    }
+
+    #[test]
+    fn test_date_from_filename_weekly() {
+        let mode = JournalMode::Weekly;
+        let date = mode.date_from_filename("2025-W03.md").unwrap();
+        // Week 3 of 2025 starts on Monday, Jan 13
+        assert_eq!(date, NaiveDate::from_ymd_opt(2025, 1, 13).unwrap());
+    }
+
+    #[test]
+    fn test_date_from_filename_weekly_invalid() {
+        let mode = JournalMode::Weekly;
+        assert!(mode.date_from_filename("2025-01-17.md").is_none());
+        assert!(mode.date_from_filename("2025-W.md").is_none());
+        assert!(mode.date_from_filename("2025-W99.md").is_none()); // Week 99 doesn't exist
+    }
+
+    #[test]
+    fn test_date_from_filename_monthly() {
+        let mode = JournalMode::Monthly;
+        let date = mode.date_from_filename("2025-01.md").unwrap();
+        assert_eq!(date, NaiveDate::from_ymd_opt(2025, 1, 1).unwrap());
+    }
+
+    #[test]
+    fn test_date_from_filename_monthly_invalid() {
+        let mode = JournalMode::Monthly;
+        assert!(mode.date_from_filename("2025-01-17.md").is_none());
+        assert!(mode.date_from_filename("2025-W03.md").is_none());
+        assert!(mode.date_from_filename("2025-13.md").is_none()); // Month 13 doesn't exist
+    }
+
+    #[test]
+    fn test_date_from_filename_single() {
+        let mode = JournalMode::Single;
+        assert!(mode.date_from_filename("journal.md").is_none());
+        assert!(mode.date_from_filename("anything.md").is_none());
+    }
+
+    #[test]
+    fn test_filename_roundtrip() {
+        // Verify that date_from_filename is inverse of filename_for_date
+        let modes = [JournalMode::Daily, JournalMode::Weekly, JournalMode::Monthly];
+        let test_date = NaiveDate::from_ymd_opt(2025, 1, 17).unwrap();
+
+        for mode in modes {
+            let filename = mode.filename_for_date(test_date);
+            let parsed_date = mode.date_from_filename(&filename).unwrap();
+
+            // For weekly/monthly, we get start of week/month
+            // So regenerate filename from parsed date to verify consistency
+            let roundtrip_filename = mode.filename_for_date(parsed_date);
+            assert_eq!(filename, roundtrip_filename);
+        }
     }
 }
