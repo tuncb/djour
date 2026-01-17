@@ -6,6 +6,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
+use std::str::FromStr;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -63,6 +64,21 @@ impl Config {
         std::env::var("EDITOR")
             .or_else(|_| std::env::var("VISUAL"))
             .unwrap_or_else(|_| self.editor.clone())
+    }
+
+    /// Get the effective mode, checking DJOUR_MODE environment variable first
+    pub fn get_mode(&self) -> JournalMode {
+        if let Ok(mode_str) = std::env::var("DJOUR_MODE") {
+            if let Ok(mode) = JournalMode::from_str(&mode_str) {
+                return mode;
+            }
+            // If invalid, log warning and fall back to config
+            eprintln!(
+                "Warning: Invalid DJOUR_MODE '{}', using configured mode '{:?}'",
+                mode_str, self.mode
+            );
+        }
+        self.mode
     }
 
     /// Detect default editor from environment or system
@@ -162,5 +178,47 @@ mod tests {
                     || std::env::var("VISUAL").is_ok()
             );
         }
+    }
+
+    #[test]
+    fn test_get_mode_with_env_override() {
+        // Clean up first to avoid interference from other tests
+        std::env::remove_var("DJOUR_MODE");
+
+        let config = Config::new(JournalMode::Daily);
+
+        // Test without env var - should use config
+        assert_eq!(config.get_mode(), JournalMode::Daily);
+
+        // Test with env var - should use env var
+        std::env::set_var("DJOUR_MODE", "weekly");
+        assert_eq!(config.get_mode(), JournalMode::Weekly);
+        std::env::remove_var("DJOUR_MODE");
+
+        // Test again without env var - should use config
+        assert_eq!(config.get_mode(), JournalMode::Daily);
+    }
+
+    #[test]
+    fn test_get_mode_invalid_env_falls_back() {
+        // Clean up first
+        std::env::remove_var("DJOUR_MODE");
+
+        let config = Config::new(JournalMode::Daily);
+
+        std::env::set_var("DJOUR_MODE", "invalid");
+        let mode = config.get_mode();
+        std::env::remove_var("DJOUR_MODE");
+
+        assert_eq!(mode, JournalMode::Daily); // Falls back
+    }
+
+    #[test]
+    fn test_get_mode_without_env() {
+        // Ensure DJOUR_MODE is not set
+        std::env::remove_var("DJOUR_MODE");
+
+        let config = Config::new(JournalMode::Monthly);
+        assert_eq!(config.get_mode(), JournalMode::Monthly);
     }
 }

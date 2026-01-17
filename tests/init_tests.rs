@@ -1,5 +1,7 @@
 //! Integration tests for init and config commands
 
+#![allow(deprecated)]
+
 use assert_cmd::Command;
 use predicates::prelude::*;
 use std::fs;

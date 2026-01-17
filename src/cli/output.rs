@@ -11,7 +11,11 @@ pub fn format_note_list(notes: &[NoteEntry]) -> String {
     let mut output = String::new();
     for entry in notes {
         if let Some(date) = entry.date {
-            output.push_str(&format!("{}  {}\n", date.format("%Y-%m-%d"), entry.filename));
+            output.push_str(&format!(
+                "{}  {}\n",
+                date.format("%d-%m-%Y"),
+                entry.filename
+            ));
         } else {
             // No date (single mode) - use spacing for alignment
             output.push_str(&format!("           {}\n", entry.filename));
@@ -46,8 +50,8 @@ mod tests {
         ];
 
         let output = format_note_list(&notes);
-        assert!(output.contains("2025-01-17  2025-01-17.md"));
-        assert!(output.contains("2025-01-16  2025-01-16.md"));
+        assert!(output.contains("17-01-2025  2025-01-17.md"));
+        assert!(output.contains("16-01-2025  2025-01-16.md"));
     }
 
     #[test]
@@ -71,7 +75,7 @@ mod tests {
         ];
 
         let output = format_note_list(&notes);
-        assert!(output.contains("2025-01-17  2025-01-17.md"));
+        assert!(output.contains("17-01-2025  2025-01-17.md"));
         assert!(output.contains("           journal.md"));
     }
 }

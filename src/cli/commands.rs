@@ -8,7 +8,7 @@ use std::path::PathBuf;
 #[command(about = "Terminal journal/notes application", long_about = None)]
 #[command(version)]
 pub struct Cli {
-    /// Time reference (e.g., today, yesterday, last monday, 2025-01-17)
+    /// Time reference (e.g., today, yesterday, last monday, 17-01-2025)
     #[arg(value_name = "TIME_REF")]
     pub time_ref: Option<String>,
 
@@ -44,16 +44,42 @@ pub enum Commands {
 
     /// List existing notes
     List {
-        /// Start date (inclusive, format: YYYY-MM-DD)
+        /// Start date (inclusive, format: DD-MM-YYYY)
         #[arg(long)]
         from: Option<String>,
 
-        /// End date (inclusive, format: YYYY-MM-DD)
+        /// End date (inclusive, format: DD-MM-YYYY)
         #[arg(long)]
         to: Option<String>,
 
         /// Maximum number of entries to show
         #[arg(long, default_value = "10")]
         limit: usize,
+    },
+
+    /// Compile tagged content
+    Compile {
+        /// Tag query (e.g., "work", "work AND urgent", "work OR personal")
+        query: String,
+
+        /// Output file path (default: compilations/<tag>.md)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+
+        /// Start date filter (format: DD-MM-YYYY)
+        #[arg(long)]
+        from: Option<String>,
+
+        /// End date filter (format: DD-MM-YYYY)
+        #[arg(long)]
+        to: Option<String>,
+
+        /// Output format: chronological, grouped
+        #[arg(long, default_value = "chronological")]
+        format: String,
+
+        /// Include parent section headings for context
+        #[arg(long)]
+        include_context: bool,
     },
 }

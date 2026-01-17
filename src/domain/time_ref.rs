@@ -45,8 +45,8 @@ impl TimeReference {
                 Self::parse_offset_weekday(&normalized[5..], TimeReference::NextWeekday)
             }
             _ => {
-                // Try parsing as YYYY-MM-DD
-                NaiveDate::parse_from_str(&normalized, "%Y-%m-%d")
+                // Try parsing as DD-MM-YYYY
+                NaiveDate::parse_from_str(&normalized, "%d-%m-%Y")
                     .map(TimeReference::SpecificDate)
                     .map_err(|_| DjourError::InvalidTimeReference(input.to_string()))
             }
@@ -208,7 +208,7 @@ mod tests {
     fn test_parse_specific_date() {
         let expected = NaiveDate::from_ymd_opt(2025, 1, 17).unwrap();
         assert_eq!(
-            TimeReference::parse("2025-01-17").unwrap(),
+            TimeReference::parse("17-01-2025").unwrap(),
             TimeReference::SpecificDate(expected)
         );
     }
@@ -216,7 +216,8 @@ mod tests {
     #[test]
     fn test_parse_invalid() {
         assert!(TimeReference::parse("invalid").is_err());
-        assert!(TimeReference::parse("2025-13-01").is_err());
+        assert!(TimeReference::parse("32-01-2025").is_err()); // Invalid day
+        assert!(TimeReference::parse("01-13-2025").is_err()); // Invalid month
         assert!(TimeReference::parse("last invalidday").is_err());
     }
 

@@ -28,17 +28,18 @@ impl OpenNoteService {
         let date = time_ref.resolve(Local::now().date_naive());
 
         // 4. Generate filename based on mode
-        let filename = config.mode.filename_for_date(date);
+        let mode = config.get_mode();
+        let filename = mode.filename_for_date(date);
 
         // 5. Check if file exists
         if !self.repository.note_exists(&filename) {
             // 6. Create file with template
-            let template_name = config.mode.template_name();
+            let template_name = mode.template_name();
             let template = load_template(self.repository.root(), template_name)?;
             let content = template.render(date);
 
             // Special handling for Single mode
-            if matches!(config.mode, JournalMode::Single) {
+            if matches!(mode, JournalMode::Single) {
                 // Append to existing file
                 let existing = self.repository.read_note(&filename)?;
                 let new_content = if existing.is_empty() {

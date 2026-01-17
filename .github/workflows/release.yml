@@ -1,0 +1,176 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: djour
+            archive_type: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: djour.exe
+            archive_type: zip
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact_name: djour
+            archive_type: tar.gz
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: djour
+            archive_type: tar.gz
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: ${{ matrix.target }}
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo/registry
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Cache cargo index
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo/git
+        key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Cache cargo build
+      uses: actions/cache@v4
+      with:
+        path: target
+        key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Build release
+      run: cargo build --release --target ${{ matrix.target }}
+
+    - name: Strip binary (Linux and macOS)
+      if: matrix.os != 'windows-latest'
+      run: strip target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+
+    - name: Get version from tag
+      id: get_version
+      shell: bash
+      run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+    - name: Create staging directory
+      shell: bash
+      run: |
+        STAGING="djour-${{ steps.get_version.outputs.VERSION }}-${{ matrix.target }}"
+        mkdir -p "$STAGING"
+        cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} "$STAGING/"
+        cp README.md LICENSE "$STAGING/"
+        echo "STAGING=$STAGING" >> $GITHUB_ENV
+
+    - name: Create archive (Linux/macOS)
+      if: matrix.archive_type == 'tar.gz'
+      run: tar czf "${{ env.STAGING }}.tar.gz" "${{ env.STAGING }}"
+
+    - name: Create archive (Windows)
+      if: matrix.archive_type == 'zip'
+      shell: pwsh
+      run: Compress-Archive -Path "${{ env.STAGING }}" -DestinationPath "${{ env.STAGING }}.zip"
+
+    - name: Generate checksum (Linux/macOS)
+      if: matrix.archive_type == 'tar.gz'
+      run: |
+        shasum -a 256 "${{ env.STAGING }}.tar.gz" > "${{ env.STAGING }}.tar.gz.sha256"
+
+    - name: Generate checksum (Windows)
+      if: matrix.archive_type == 'zip'
+      shell: pwsh
+      run: |
+        $hash = Get-FileHash "${{ env.STAGING }}.zip" -Algorithm SHA256
+        "$($hash.Hash.ToLower())  ${{ env.STAGING }}.zip" | Out-File -FilePath "${{ env.STAGING }}.zip.sha256" -Encoding ASCII
+
+    - name: Upload archive artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: archive-${{ matrix.target }}
+        path: |
+          ${{ env.STAGING }}.${{ matrix.archive_type }}
+          ${{ env.STAGING }}.${{ matrix.archive_type }}.sha256
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: Display structure
+      run: ls -R artifacts
+
+    - name: Flatten artifacts
+      run: |
+        mkdir -p release-files
+        find artifacts -type f -exec mv {} release-files/ \;
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: release-files/*
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+        body: |
+          ## Installation
+
+          Download the appropriate archive for your platform:
+          - **Linux (x86_64)**: `djour-${{ github.ref_name }}-x86_64-unknown-linux-gnu.tar.gz`
+          - **macOS (Intel)**: `djour-${{ github.ref_name }}-x86_64-apple-darwin.tar.gz`
+          - **macOS (Apple Silicon)**: `djour-${{ github.ref_name }}-aarch64-apple-darwin.tar.gz`
+          - **Windows (x86_64)**: `djour-${{ github.ref_name }}-x86_64-pc-windows-msvc.zip`
+
+          Extract the archive and add the `djour` executable to your PATH.
+
+          ## Verifying Downloads
+
+          SHA256 checksums are provided for each archive. Verify your download:
+
+          ```bash
+          # Linux/macOS
+          shasum -a 256 -c djour-${{ github.ref_name }}-<platform>.tar.gz.sha256
+
+          # Windows (PowerShell)
+          (Get-FileHash djour-${{ github.ref_name }}-<platform>.zip).Hash -eq (Get-Content djour-${{ github.ref_name }}-<platform>.zip.sha256).Split()[0]
+          ```
+
+          ## Quick Start
+
+          ```bash
+          # Initialize a journal
+          djour init
+
+          # Open today's note
+          djour today
+
+          # Compile tagged content
+          djour compile work
+          ```
+
+          See the [README](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/README.md) for full documentation.
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

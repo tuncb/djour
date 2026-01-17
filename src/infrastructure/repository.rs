@@ -51,7 +51,23 @@ impl FileSystemRepository {
     }
 
     /// Discover journal root by walking up from current directory
+    /// First checks DJOUR_ROOT environment variable, then falls back to discovery
     pub fn discover() -> Result<Self> {
+        // 1. Check DJOUR_ROOT environment variable first
+        if let Ok(root_path) = std::env::var("DJOUR_ROOT") {
+            let path = PathBuf::from(root_path);
+            if Self::has_djour_dir(&path) {
+                return Ok(FileSystemRepository::new(path));
+            } else {
+                return Err(DjourError::Config(format!(
+                    "DJOUR_ROOT is set to '{}' but no .djour directory found. \
+                    Run 'djour init' in that directory or unset DJOUR_ROOT.",
+                    path.display()
+                )));
+            }
+        }
+
+        // 2. Fall back to walking up from current directory
         let current_dir = std::env::current_dir()?;
         Self::discover_from(&current_dir)
     }
@@ -197,10 +213,10 @@ impl FileSystemRepository {
 
         // Apply date range filters
         if let Some(from_date) = from {
-            notes.retain(|e| e.date.map_or(true, |d| d >= from_date));
+            notes.retain(|e| e.date.is_none_or(|d| d >= from_date));
         }
         if let Some(to_date) = to {
-            notes.retain(|e| e.date.map_or(true, |d| d <= to_date));
+            notes.retain(|e| e.date.is_none_or(|d| d <= to_date));
         }
 
         // Sort by date descending (newest first)
@@ -426,7 +442,9 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let repo = FileSystemRepository::new(temp.path().to_path_buf());
 
-        let notes = repo.list_notes(JournalMode::Daily, None, None, None).unwrap();
+        let notes = repo
+            .list_notes(JournalMode::Daily, None, None, None)
+            .unwrap();
         assert_eq!(notes.len(), 0);
     }
 
@@ -440,7 +458,9 @@ mod tests {
         fs::write(temp.path().join("2025-01-16.md"), "note 2").unwrap();
         fs::write(temp.path().join("2025-01-15.md"), "note 3").unwrap();
 
-        let notes = repo.list_notes(JournalMode::Daily, None, None, None).unwrap();
+        let notes = repo
+            .list_notes(JournalMode::Daily, None, None, None)
+            .unwrap();
 
         assert_eq!(notes.len(), 3);
         // Should be sorted newest first
@@ -460,7 +480,9 @@ mod tests {
         fs::write(temp.path().join("invalid.md"), "bad").unwrap();
         fs::create_dir(temp.path().join(".djour")).unwrap();
 
-        let notes = repo.list_notes(JournalMode::Daily, None, None, None).unwrap();
+        let notes = repo
+            .list_notes(JournalMode::Daily, None, None, None)
+            .unwrap();
 
         // Should only include valid daily note
         assert_eq!(notes.len(), 1);
@@ -514,7 +536,9 @@ mod tests {
         fs::write(temp.path().join("journal.md"), "note").unwrap();
         fs::write(temp.path().join("2025-01-17.md"), "other").unwrap();
 
-        let notes = repo.list_notes(JournalMode::Single, None, None, None).unwrap();
+        let notes = repo
+            .list_notes(JournalMode::Single, None, None, None)
+            .unwrap();
 
         // Should only include journal.md
         assert_eq!(notes.len(), 1);
@@ -531,7 +555,9 @@ mod tests {
         fs::write(temp.path().join("2025-W02.md"), "week 2").unwrap();
         fs::write(temp.path().join("2025-01-17.md"), "daily").unwrap(); // Should be ignored
 
-        let notes = repo.list_notes(JournalMode::Weekly, None, None, None).unwrap();
+        let notes = repo
+            .list_notes(JournalMode::Weekly, None, None, None)
+            .unwrap();
 
         // Should only include weekly notes
         assert_eq!(notes.len(), 2);
@@ -556,5 +582,56 @@ mod tests {
         assert_eq!(notes.len(), 2);
         assert_eq!(notes[0].filename, "2025-01.md");
         assert_eq!(notes[1].filename, "2024-12.md");
+    }
+
+    #[test]
+    fn test_discover_with_djour_root_env() {
+        let temp = TempDir::new().unwrap();
+        fs::create_dir(temp.path().join(".djour")).unwrap();
+
+        // Set DJOUR_ROOT
+        std::env::set_var("DJOUR_ROOT", temp.path());
+
+        let repo = FileSystemRepository::discover().unwrap();
+        assert_eq!(repo.root, temp.path());
+
+        std::env::remove_var("DJOUR_ROOT");
+    }
+
+    #[test]
+    fn test_discover_djour_root_not_initialized() {
+        let temp = TempDir::new().unwrap();
+        // No .djour directory
+
+        std::env::set_var("DJOUR_ROOT", temp.path());
+
+        let result = FileSystemRepository::discover();
+        assert!(result.is_err());
+
+        match result.unwrap_err() {
+            DjourError::Config(msg) => {
+                assert!(msg.contains("no .djour directory"));
+            }
+            _ => panic!("Expected Config error"),
+        }
+
+        std::env::remove_var("DJOUR_ROOT");
+    }
+
+    #[test]
+    fn test_discover_without_djour_root_env() {
+        // Ensure DJOUR_ROOT is not set
+        std::env::remove_var("DJOUR_ROOT");
+
+        // This test will fail if run outside a djour directory
+        // but it tests that the code path works when env var is not set
+        let result = FileSystemRepository::discover();
+
+        // Either discovers a journal or fails with NotDjourDirectory
+        match result {
+            Ok(_) => {}                                 // Found a journal
+            Err(DjourError::NotDjourDirectory(_)) => {} // Expected
+            Err(e) => panic!("Unexpected error: {}", e),
+        }
     }
 }

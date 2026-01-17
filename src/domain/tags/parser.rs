@@ -311,16 +311,8 @@ mod tests {
     #[test]
     fn test_section_stack_deduplication() {
         let mut stack = SectionStack::new();
-        stack.push_heading(
-            1,
-            "Main",
-            vec!["work".to_string(), "urgent".to_string()],
-        );
-        stack.push_heading(
-            2,
-            "Sub",
-            vec!["urgent".to_string(), "meeting".to_string()],
-        );
+        stack.push_heading(1, "Main", vec!["work".to_string(), "urgent".to_string()]);
+        stack.push_heading(2, "Sub", vec!["urgent".to_string(), "meeting".to_string()]);
 
         let tags = stack.current_tags();
         assert_eq!(tags, vec!["work", "urgent", "meeting"]); // "urgent" not duplicated
@@ -504,8 +496,7 @@ Use the `git commit` command here. #git #tutorial
         let date = Some(NaiveDate::from_ymd_opt(2025, 1, 17).unwrap());
         let markdown = "## Notes #work";
 
-        let results =
-            TagParser::extract_from_markdown(markdown, Path::new("2025-01-17.md"), date);
+        let results = TagParser::extract_from_markdown(markdown, Path::new("2025-01-17.md"), date);
 
         assert_eq!(results[0].date, date);
     }

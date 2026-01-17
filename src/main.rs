@@ -1,9 +1,11 @@
 use chrono::NaiveDate;
 use clap::Parser;
 use djour::application::{
-    init::InitService, manage_config::ConfigService, ListNotesService, OpenNoteService,
+    init::InitService, manage_config::ConfigService, CompileOptions, CompileTagsService,
+    ListNotesService, OpenNoteService,
 };
 use djour::cli::{format_note_list, Cli, Commands};
+use djour::domain::tags::CompilationFormat;
 use djour::domain::JournalMode;
 use djour::error::DjourError;
 use djour::infrastructure::{FileSystemRepository, JournalRepository};
@@ -17,7 +19,7 @@ fn main() {
     match result {
         Ok(_) => std::process::exit(0),
         Err(e) => {
-            eprintln!("Error: {}", e);
+            eprintln!("{}", e.display_with_suggestions());
             std::process::exit(e.exit_code());
         }
     }
@@ -68,32 +70,88 @@ fn run(cli: Cli) -> Result<(), DjourError> {
             let repo = FileSystemRepository::discover()?;
             let config = repo.load_config()?;
 
-            // Parse date strings
+            // Parse date strings (DD-MM-YYYY format)
             let from_date = if let Some(s) = from {
-                Some(
-                    NaiveDate::parse_from_str(&s, "%Y-%m-%d")
-                        .map_err(|_| DjourError::Config(format!("Invalid date format: {}", s)))?,
-                )
+                Some(NaiveDate::parse_from_str(&s, "%d-%m-%Y").map_err(|_| {
+                    DjourError::Config(format!("Invalid date format: {}. Use DD-MM-YYYY", s))
+                })?)
             } else {
                 None
             };
 
             let to_date = if let Some(s) = to {
-                Some(
-                    NaiveDate::parse_from_str(&s, "%Y-%m-%d")
-                        .map_err(|_| DjourError::Config(format!("Invalid date format: {}", s)))?,
-                )
+                Some(NaiveDate::parse_from_str(&s, "%d-%m-%Y").map_err(|_| {
+                    DjourError::Config(format!("Invalid date format: {}. Use DD-MM-YYYY", s))
+                })?)
             } else {
                 None
             };
 
             // Execute list
             let service = ListNotesService::new(repo);
-            let notes = service.execute(config.mode, from_date, to_date, Some(limit))?;
+            let notes = service.execute(config.get_mode(), from_date, to_date, Some(limit))?;
 
             // Format and print output
             let output = format_note_list(&notes);
             print!("{}", output);
+
+            Ok(())
+        }
+        Some(Commands::Compile {
+            query,
+            output,
+            from,
+            to,
+            format,
+            include_context,
+        }) => {
+            // Discover repository
+            let repo = FileSystemRepository::discover()?;
+
+            // Parse date strings (DD-MM-YYYY format)
+            let from_date = if let Some(s) = from {
+                Some(NaiveDate::parse_from_str(&s, "%d-%m-%Y").map_err(|_| {
+                    DjourError::Config(format!("Invalid date format: {}. Use DD-MM-YYYY", s))
+                })?)
+            } else {
+                None
+            };
+
+            let to_date = if let Some(s) = to {
+                Some(NaiveDate::parse_from_str(&s, "%d-%m-%Y").map_err(|_| {
+                    DjourError::Config(format!("Invalid date format: {}. Use DD-MM-YYYY", s))
+                })?)
+            } else {
+                None
+            };
+
+            // Parse format string
+            let compilation_format = match format.to_lowercase().as_str() {
+                "chronological" => CompilationFormat::Chronological,
+                "grouped" => CompilationFormat::Grouped,
+                _ => {
+                    return Err(DjourError::Config(format!(
+                        "Invalid format: {}. Use 'chronological' or 'grouped'",
+                        format
+                    )))
+                }
+            };
+
+            // Create compile options
+            let options = CompileOptions {
+                query,
+                output,
+                from: from_date,
+                to: to_date,
+                format: compilation_format,
+                include_context,
+            };
+
+            // Execute compilation
+            let service = CompileTagsService::new(repo);
+            let output_path = service.execute(options)?;
+
+            println!("Compiled tags to: {}", output_path.to_string_lossy());
 
             Ok(())
         }

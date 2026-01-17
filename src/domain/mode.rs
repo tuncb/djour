@@ -259,7 +259,11 @@ mod tests {
     #[test]
     fn test_filename_roundtrip() {
         // Verify that date_from_filename is inverse of filename_for_date
-        let modes = [JournalMode::Daily, JournalMode::Weekly, JournalMode::Monthly];
+        let modes = [
+            JournalMode::Daily,
+            JournalMode::Weekly,
+            JournalMode::Monthly,
+        ];
         let test_date = NaiveDate::from_ymd_opt(2025, 1, 17).unwrap();
 
         for mode in modes {

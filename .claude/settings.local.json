@@ -9,7 +9,16 @@
       "Bash(cargo clippy:*)",
       "Bash(..\\\\target\\\\debug\\\\djour.exe today)",
       "Bash(cargo tree:*)",
-      "Bash(cargo add:*)"
+      "Bash(cargo add:*)",
+      "Bash(cargo run:*)",
+      "Bash(C:/work/djour/target/debug/djour compile \"work AND coding\")",
+      "Bash(C:/work/djour/target/debug/djour compile work --format grouped)",
+      "Bash(C:/work/djour/target/debug/djour compile work --include-context)",
+      "Bash(C:/work/djour/target/debug/djour list:*)",
+      "Bash(C:/work/djour/target/debug/djour compile work)",
+      "Bash(C:/work/djour/target/debug/djour compile:*)",
+      "Bash(find:*)",
+      "Bash(yamllint:*)"
     ]
   }
 }

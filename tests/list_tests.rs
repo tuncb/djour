@@ -1,5 +1,7 @@
 //! Integration tests for list command
 
+#![allow(deprecated)]
+
 use assert_cmd::Command;
 use predicates::prelude::*;
 use std::fs;
@@ -51,9 +53,9 @@ fn test_list_with_notes() {
         .arg("list")
         .assert()
         .success()
-        .stdout(predicate::str::contains("2025-01-17"))
-        .stdout(predicate::str::contains("2025-01-16"))
-        .stdout(predicate::str::contains("2025-01-15"));
+        .stdout(predicate::str::contains("17-01-2025"))
+        .stdout(predicate::str::contains("16-01-2025"))
+        .stdout(predicate::str::contains("15-01-2025"));
 }
 
 #[test]
@@ -83,9 +85,9 @@ fn test_list_sorted_newest_first() {
 
     // Should be sorted newest first
     assert_eq!(lines.len(), 3);
-    assert!(lines[0].contains("2025-01-20"));
-    assert!(lines[1].contains("2025-01-15"));
-    assert!(lines[2].contains("2025-01-10"));
+    assert!(lines[0].contains("20-01-2025"));
+    assert!(lines[1].contains("15-01-2025"));
+    assert!(lines[2].contains("10-01-2025"));
 }
 
 #[test]
@@ -109,14 +111,14 @@ fn test_list_with_date_range() {
         .current_dir(temp.path())
         .arg("list")
         .arg("--from")
-        .arg("2025-01-12")
+        .arg("12-01-2025")
         .arg("--to")
-        .arg("2025-01-18")
+        .arg("18-01-2025")
         .assert()
         .success()
-        .stdout(predicate::str::contains("2025-01-15"))
-        .stdout(predicate::str::contains("2025-01-10").not())
-        .stdout(predicate::str::contains("2025-01-20").not());
+        .stdout(predicate::str::contains("15-01-2025"))
+        .stdout(predicate::str::contains("10-01-2025").not())
+        .stdout(predicate::str::contains("20-01-2025").not());
 }
 
 #[test]
@@ -139,12 +141,12 @@ fn test_list_with_from_only() {
         .current_dir(temp.path())
         .arg("list")
         .arg("--from")
-        .arg("2025-01-15")
+        .arg("15-01-2025")
         .assert()
         .success()
-        .stdout(predicate::str::contains("2025-01-15"))
-        .stdout(predicate::str::contains("2025-01-20"))
-        .stdout(predicate::str::contains("2025-01-10").not());
+        .stdout(predicate::str::contains("15-01-2025"))
+        .stdout(predicate::str::contains("20-01-2025"))
+        .stdout(predicate::str::contains("10-01-2025").not());
 }
 
 #[test]
@@ -167,12 +169,12 @@ fn test_list_with_to_only() {
         .current_dir(temp.path())
         .arg("list")
         .arg("--to")
-        .arg("2025-01-15")
+        .arg("15-01-2025")
         .assert()
         .success()
-        .stdout(predicate::str::contains("2025-01-10"))
-        .stdout(predicate::str::contains("2025-01-15"))
-        .stdout(predicate::str::contains("2025-01-20").not());
+        .stdout(predicate::str::contains("10-01-2025"))
+        .stdout(predicate::str::contains("15-01-2025"))
+        .stdout(predicate::str::contains("20-01-2025").not());
 }
 
 #[test]
@@ -207,8 +209,8 @@ fn test_list_with_limit() {
 
     // Should only show 2 entries (newest ones)
     assert_eq!(line_count, 2);
-    assert!(stdout.contains("2025-01-05"));
-    assert!(stdout.contains("2025-01-04"));
+    assert!(stdout.contains("05-01-2025"));
+    assert!(stdout.contains("04-01-2025"));
 }
 
 #[test]
@@ -416,9 +418,9 @@ fn test_list_combined_filters() {
         .current_dir(temp.path())
         .arg("list")
         .arg("--from")
-        .arg("2025-01-12")
+        .arg("12-01-2025")
         .arg("--to")
-        .arg("2025-01-18")
+        .arg("18-01-2025")
         .arg("--limit")
         .arg("3")
         .output()
