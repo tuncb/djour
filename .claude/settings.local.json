@@ -6,7 +6,8 @@
       "Bash(cargo test:*)",
       "Bash(cargo build:*)",
       "Bash(cargo fmt:*)",
-      "Bash(cargo clippy:*)"
+      "Bash(cargo clippy:*)",
+      "Bash(..\\\\target\\\\debug\\\\djour.exe today)"
     ]
   }
 }

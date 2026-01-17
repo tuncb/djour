@@ -2,6 +2,7 @@
 
 use chrono::{Datelike, NaiveDate};
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 /// Journal modes determine how notes are organized
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -43,6 +44,23 @@ impl JournalMode {
             JournalMode::Weekly => "weekly.md",
             JournalMode::Monthly => "monthly.md",
             JournalMode::Single => "entry.md",
+        }
+    }
+}
+
+impl FromStr for JournalMode {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "daily" => Ok(JournalMode::Daily),
+            "weekly" => Ok(JournalMode::Weekly),
+            "monthly" => Ok(JournalMode::Monthly),
+            "single" => Ok(JournalMode::Single),
+            _ => Err(format!(
+                "Invalid mode: '{}'. Valid modes are: daily, weekly, monthly, single",
+                s
+            )),
         }
     }
 }
@@ -95,5 +113,56 @@ mod tests {
         assert_eq!(JournalMode::Weekly.template_name(), "weekly.md");
         assert_eq!(JournalMode::Monthly.template_name(), "monthly.md");
         assert_eq!(JournalMode::Single.template_name(), "entry.md");
+    }
+
+    #[test]
+    fn test_from_str_valid_modes() {
+        use std::str::FromStr;
+
+        assert_eq!(JournalMode::from_str("daily").unwrap(), JournalMode::Daily);
+        assert_eq!(
+            JournalMode::from_str("weekly").unwrap(),
+            JournalMode::Weekly
+        );
+        assert_eq!(
+            JournalMode::from_str("monthly").unwrap(),
+            JournalMode::Monthly
+        );
+        assert_eq!(
+            JournalMode::from_str("single").unwrap(),
+            JournalMode::Single
+        );
+    }
+
+    #[test]
+    fn test_from_str_case_insensitive() {
+        use std::str::FromStr;
+
+        assert_eq!(JournalMode::from_str("DAILY").unwrap(), JournalMode::Daily);
+        assert_eq!(
+            JournalMode::from_str("Weekly").unwrap(),
+            JournalMode::Weekly
+        );
+        assert_eq!(
+            JournalMode::from_str("MONTHLY").unwrap(),
+            JournalMode::Monthly
+        );
+        assert_eq!(
+            JournalMode::from_str("SiNgLe").unwrap(),
+            JournalMode::Single
+        );
+    }
+
+    #[test]
+    fn test_from_str_invalid() {
+        use std::str::FromStr;
+
+        assert!(JournalMode::from_str("invalid").is_err());
+        assert!(JournalMode::from_str("day").is_err());
+        assert!(JournalMode::from_str("").is_err());
+
+        let err = JournalMode::from_str("invalid").unwrap_err();
+        assert!(err.contains("Invalid mode"));
+        assert!(err.contains("daily, weekly, monthly, single"));
     }
 }
