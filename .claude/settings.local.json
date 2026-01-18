@@ -18,7 +18,9 @@
       "Bash(C:/work/djour/target/debug/djour compile work)",
       "Bash(C:/work/djour/target/debug/djour compile:*)",
       "Bash(find:*)",
-      "Bash(yamllint:*)"
+      "Bash(yamllint:*)",
+      "Bash(cargo doc:*)",
+      "WebFetch(domain:docs.rs)"
     ]
   }
 }

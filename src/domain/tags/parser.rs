@@ -239,6 +239,14 @@ impl TagParser {
                     }
                 }
 
+                Event::SoftBreak | Event::HardBreak => {
+                    if in_heading {
+                        current_heading_text.push(' ');
+                    } else if in_paragraph {
+                        current_paragraph.push('\n');
+                    }
+                }
+
                 _ => {}
             }
         }
@@ -499,5 +507,32 @@ Use the `git commit` command here. #git #tutorial
         let results = TagParser::extract_from_markdown(markdown, Path::new("2025-01-17.md"), date);
 
         assert_eq!(results[0].date, date);
+    }
+
+    #[test]
+    fn test_multi_line_paragraph_with_tags() {
+        // Test that SoftBreak (line continuation in source) is preserved
+        let content = "Line one #tag\nLine two";
+        let results = TagParser::extract_from_markdown(content, Path::new("test.md"), None);
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0].content.contains("Line one"));
+        assert!(results[0].content.contains("Line two"));
+        assert!(results[0].content.contains('\n')); // Newline preserved
+        assert_eq!(results[0].tags, vec!["tag"]);
+    }
+
+    #[test]
+    fn test_multi_line_paragraph_tag_not_merged_with_next_line() {
+        // Reproduces the bug where "#diary" merged with "I" to form "#diaryI"
+        let content = "This was a very sad day. #tostos #diary\nI am planning to go.";
+        let results = TagParser::extract_from_markdown(content, Path::new("test.md"), None);
+
+        assert_eq!(results.len(), 1);
+        // Tags should be correctly extracted
+        assert!(results[0].tags.contains(&"tostos".to_string()));
+        assert!(results[0].tags.contains(&"diary".to_string()));
+        // The "I" should not be consumed by the tag
+        assert!(results[0].content.contains("I am planning"));
     }
 }
