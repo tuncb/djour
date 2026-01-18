@@ -3,6 +3,8 @@ name: Coverage
 on:
   push:
     branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
 jobs:
   coverage:
@@ -14,14 +16,18 @@ jobs:
     - name: Install Rust
       uses: dtolnay/rust-toolchain@stable
 
-    - name: Install tarpaulin
-      run: cargo install cargo-tarpaulin
+    - name: Install cargo-llvm-cov
+      uses: taiki-e/install-action@cargo-llvm-cov
 
-    - name: Generate coverage
-      run: cargo tarpaulin --out xml --verbose
+    - name: Generate coverage report
+      run: cargo llvm-cov --all-features --html --output-dir coverage
 
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v4
+    - name: Generate coverage summary
+      run: cargo llvm-cov --all-features --no-run --summary-only
+
+    - name: Upload coverage report
+      uses: actions/upload-artifact@v4
       with:
-        file: ./cobertura.xml
-        fail_ci_if_error: false
+        name: coverage-report
+        path: coverage/
+        retention-days: 14
