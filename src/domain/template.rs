@@ -1,13 +1,13 @@
 //! Template system for note generation
 
 use crate::error::{DjourError, Result};
-use chrono::{Datelike, NaiveDate};
+use chrono::{Datelike, Duration, NaiveDate};
 use std::fs;
 use std::path::Path;
 
 // Built-in template constants
 const DAILY_TEMPLATE: &str = "# {DATE}\n\n";
-const WEEKLY_TEMPLATE: &str = "# Week {WEEK_NUMBER}, {YEAR}\n\n## Monday\n\n\n## Tuesday\n\n\n## Wednesday\n\n\n## Thursday\n\n\n## Friday\n\n\n## Weekend\n\n";
+const WEEKLY_TEMPLATE: &str = "# Week {WEEK_NUMBER}, {YEAR} ({WEEK_START_DATE} - {WEEK_END_DATE})\n\n## Monday ({MONDAY_DATE})\n\n\n## Tuesday ({TUESDAY_DATE})\n\n\n## Wednesday ({WEDNESDAY_DATE})\n\n\n## Thursday ({THURSDAY_DATE})\n\n\n## Friday ({FRIDAY_DATE})\n\n\n## Saturday ({SATURDAY_DATE})\n\n\n## Sunday ({SUNDAY_DATE})\n\n";
 const MONTHLY_TEMPLATE: &str =
     "# {MONTH} {YEAR}\n\n## Week 1\n\n\n## Week 2\n\n\n## Week 3\n\n\n## Week 4\n\n";
 const ENTRY_TEMPLATE: &str = "---\n\n# {DATE}\n\n";
@@ -51,6 +51,9 @@ impl Template {
     pub fn render(&self, date: NaiveDate) -> String {
         let mut result = self.content.clone();
 
+        let week_start = date - Duration::days(date.weekday().num_days_from_monday() as i64);
+        let week_end = week_start + Duration::days(6);
+
         // Replace {DATE} with formatted date (e.g., "January 17, 2025")
         result = result.replace("{DATE}", &date.format("%B %d, %Y").to_string());
 
@@ -66,6 +69,36 @@ impl Template {
         // Replace {WEEK_NUMBER} with ISO week number (e.g., "03")
         let week_num = date.iso_week().week();
         result = result.replace("{WEEK_NUMBER}", &format!("{:02}", week_num));
+
+        // Replace {WEEK_START_DATE}/{WEEK_END_DATE} with formatted dates
+        result = result.replace(
+            "{WEEK_START_DATE}",
+            &week_start.format("%B %d, %Y").to_string(),
+        );
+        result = result.replace("{WEEK_END_DATE}", &week_end.format("%B %d, %Y").to_string());
+        result = result.replace(
+            "{WEEK_START_ISO}",
+            &week_start.format("%Y-%m-%d").to_string(),
+        );
+        result = result.replace("{WEEK_END_ISO}", &week_end.format("%Y-%m-%d").to_string());
+
+        // Replace weekday date placeholders based on ISO week start (Monday)
+        let weekdays = [
+            ("MONDAY", 0),
+            ("TUESDAY", 1),
+            ("WEDNESDAY", 2),
+            ("THURSDAY", 3),
+            ("FRIDAY", 4),
+            ("SATURDAY", 5),
+            ("SUNDAY", 6),
+        ];
+        for (name, offset) in weekdays {
+            let day = week_start + Duration::days(offset);
+            let long_key = format!("{{{}_DATE}}", name);
+            let iso_key = format!("{{{}_ISO}}", name);
+            result = result.replace(&long_key, &day.format("%B %d, %Y").to_string());
+            result = result.replace(&iso_key, &day.format("%Y-%m-%d").to_string());
+        }
 
         // Replace {DAY_NAME} with day name (e.g., "Friday")
         result = result.replace("{DAY_NAME}", &date.format("%A").to_string());
@@ -104,9 +137,11 @@ mod tests {
     #[test]
     fn test_load_builtin_weekly() {
         let template = Template::from_builtin("weekly.md").unwrap();
-        assert!(template.content.contains("# Week {WEEK_NUMBER}, {YEAR}"));
-        assert!(template.content.contains("## Monday"));
-        assert!(template.content.contains("## Weekend"));
+        assert!(template
+            .content
+            .contains("# Week {WEEK_NUMBER}, {YEAR} ({WEEK_START_DATE} - {WEEK_END_DATE})"));
+        assert!(template.content.contains("## Monday ({MONDAY_DATE})"));
+        assert!(template.content.contains("## Sunday ({SUNDAY_DATE})"));
     }
 
     #[test]

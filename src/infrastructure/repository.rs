@@ -551,8 +551,8 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let repo = FileSystemRepository::new(temp.path().to_path_buf());
 
-        fs::write(temp.path().join("2025-W03.md"), "week 3").unwrap();
-        fs::write(temp.path().join("2025-W02.md"), "week 2").unwrap();
+        fs::write(temp.path().join("2025-W03-2025-01-13.md"), "week 3").unwrap();
+        fs::write(temp.path().join("2025-W02-2025-01-06.md"), "week 2").unwrap();
         fs::write(temp.path().join("2025-01-17.md"), "daily").unwrap(); // Should be ignored
 
         let notes = repo
@@ -561,8 +561,8 @@ mod tests {
 
         // Should only include weekly notes
         assert_eq!(notes.len(), 2);
-        assert_eq!(notes[0].filename, "2025-W03.md");
-        assert_eq!(notes[1].filename, "2025-W02.md");
+        assert_eq!(notes[0].filename, "2025-W03-2025-01-13.md");
+        assert_eq!(notes[1].filename, "2025-W02-2025-01-06.md");
     }
 
     #[test]

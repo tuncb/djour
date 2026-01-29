@@ -283,8 +283,8 @@ fn test_list_weekly_mode() {
         .success();
 
     // Create weekly notes
-    fs::write(temp.path().join("2025-W03.md"), "week 3").unwrap();
-    fs::write(temp.path().join("2025-W02.md"), "week 2").unwrap();
+    fs::write(temp.path().join("2025-W03-2025-01-13.md"), "week 3").unwrap();
+    fs::write(temp.path().join("2025-W02-2025-01-06.md"), "week 2").unwrap();
 
     // Should list both
     Command::cargo_bin("djour")

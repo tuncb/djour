@@ -1,6 +1,6 @@
 //! Journal mode definitions and file name generation
 
-use chrono::{Datelike, NaiveDate};
+use chrono::{Datelike, Duration, NaiveDate};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
@@ -28,7 +28,14 @@ impl JournalMode {
             }
             JournalMode::Weekly => {
                 let week = date.iso_week();
-                format!("{}-W{:02}.md", week.year(), week.week())
+                let week_start =
+                    date - Duration::days(date.weekday().num_days_from_monday() as i64);
+                format!(
+                    "{}-W{:02}-{}.md",
+                    week.year(),
+                    week.week(),
+                    week_start.format("%Y-%m-%d")
+                )
             }
             JournalMode::Monthly => {
                 format!("{}.md", date.format("%Y-%m"))
@@ -58,18 +65,34 @@ impl JournalMode {
                 NaiveDate::parse_from_str(stem, "%Y-%m-%d").ok()
             }
             JournalMode::Weekly => {
-                // Parse YYYY-Www (e.g., "2025-W03")
+                // Parse YYYY-Www or YYYY-Www-YYYY-MM-DD (e.g., "2025-W03-2025-01-13")
                 let parts: Vec<&str> = stem.split('-').collect();
-                if parts.len() != 2 || !parts[1].starts_with('W') {
-                    return None;
+                if parts.len() == 2 && parts[1].starts_with('W') {
+                    let year: i32 = parts[0].parse().ok()?;
+                    let week_str = &parts[1][1..]; // Skip 'W'
+                    let week: u32 = week_str.parse().ok()?;
+
+                    // Get first day (Monday) of ISO week
+                    return NaiveDate::from_isoywd_opt(year, week, chrono::Weekday::Mon);
                 }
 
-                let year: i32 = parts[0].parse().ok()?;
-                let week_str = &parts[1][1..]; // Skip 'W'
-                let week: u32 = week_str.parse().ok()?;
+                if parts.len() == 5 && parts[1].starts_with('W') {
+                    let year: i32 = parts[0].parse().ok()?;
+                    let week_str = &parts[1][1..]; // Skip 'W'
+                    let week: u32 = week_str.parse().ok()?;
+                    let date_str = format!("{}-{}-{}", parts[2], parts[3], parts[4]);
+                    let start_date = NaiveDate::parse_from_str(&date_str, "%Y-%m-%d").ok()?;
 
-                // Get first day (Monday) of ISO week
-                NaiveDate::from_isoywd_opt(year, week, chrono::Weekday::Mon)
+                    let iso = start_date.iso_week();
+                    if iso.year() == year
+                        && iso.week() == week
+                        && start_date.weekday() == chrono::Weekday::Mon
+                    {
+                        return Some(start_date);
+                    }
+                }
+
+                None
             }
             JournalMode::Monthly => {
                 // Parse YYYY-MM and use first day of month
@@ -118,7 +141,7 @@ mod tests {
         let mode = JournalMode::Weekly;
         let date = NaiveDate::from_ymd_opt(2025, 1, 17).unwrap();
         // January 17, 2025 is in week 3
-        assert_eq!(mode.filename_for_date(date), "2025-W03.md");
+        assert_eq!(mode.filename_for_date(date), "2025-W03-2025-01-13.md");
     }
 
     #[test]
@@ -140,7 +163,7 @@ mod tests {
         let mode = JournalMode::Weekly;
         // December 30, 2024 is in 2025-W01 (ISO week date)
         let date = NaiveDate::from_ymd_opt(2024, 12, 30).unwrap();
-        assert_eq!(mode.filename_for_date(date), "2025-W01.md");
+        assert_eq!(mode.filename_for_date(date), "2025-W01-2024-12-30.md");
     }
 
     #[test]
@@ -221,8 +244,15 @@ mod tests {
     #[test]
     fn test_date_from_filename_weekly() {
         let mode = JournalMode::Weekly;
-        let date = mode.date_from_filename("2025-W03.md").unwrap();
+        let date = mode.date_from_filename("2025-W03-2025-01-13.md").unwrap();
         // Week 3 of 2025 starts on Monday, Jan 13
+        assert_eq!(date, NaiveDate::from_ymd_opt(2025, 1, 13).unwrap());
+    }
+
+    #[test]
+    fn test_date_from_filename_weekly_legacy() {
+        let mode = JournalMode::Weekly;
+        let date = mode.date_from_filename("2025-W03.md").unwrap();
         assert_eq!(date, NaiveDate::from_ymd_opt(2025, 1, 13).unwrap());
     }
 
@@ -232,6 +262,7 @@ mod tests {
         assert!(mode.date_from_filename("2025-01-17.md").is_none());
         assert!(mode.date_from_filename("2025-W.md").is_none());
         assert!(mode.date_from_filename("2025-W99.md").is_none()); // Week 99 doesn't exist
+        assert!(mode.date_from_filename("2025-W03-2025-01-14.md").is_none()); // Date does not match ISO week
     }
 
     #[test]

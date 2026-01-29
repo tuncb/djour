@@ -486,9 +486,9 @@ Critical path items.
 
         let tasks = results
             .iter()
-            .find(|r| {
-                matches!(&r.context, TagContext::Section { heading, .. } if heading == "Tasks")
-            })
+            .find(
+                |r| matches!(&r.context, TagContext::Section { heading, .. } if heading == "Tasks"),
+            )
             .unwrap();
         assert_eq!(tasks.tags, vec!["project-alpha", "work", "urgent"]);
     }
