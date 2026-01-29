@@ -142,6 +142,10 @@ impl TagParser {
     ) -> Vec<TaggedContent> {
         let mut results = Vec::new();
         let mut section_stack = SectionStack::new();
+        let mut list_tag_stack: Vec<Vec<String>> = Vec::new();
+        let mut item_stack: Vec<String> = Vec::new();
+        let mut item_tag_stack: Vec<Vec<String>> = Vec::new();
+        let mut pending_list_tags: Option<Vec<String>> = None;
 
         let parser = MdParser::new(content);
         let mut current_paragraph = String::new();
@@ -150,12 +154,75 @@ impl TagParser {
         let mut current_heading_text = String::new();
         let mut current_heading_level = 0;
 
+        let extend_unique = |dest: &mut Vec<String>, tags: Vec<String>| {
+            for tag in tags {
+                if !dest.contains(&tag) {
+                    dest.push(tag);
+                }
+            }
+        };
+
         for event in parser {
             match event {
+                Event::Start(Tag::List(_)) => {
+                    // Establish list-level inherited tags (from parent list item, if any)
+                    let mut inherited = if item_stack.is_empty() {
+                        pending_list_tags.take().unwrap_or_default()
+                    } else {
+                        list_tag_stack.last().cloned().unwrap_or_default()
+                    };
+                    if !item_stack.is_empty() {
+                        if let Some(item_tags) = item_tag_stack.last().cloned() {
+                            extend_unique(&mut inherited, item_tags);
+                        }
+                        if let Some(item_text) = item_stack.last() {
+                            let text_tags = extract_tags(item_text);
+                            extend_unique(&mut inherited, text_tags);
+                        }
+                    }
+                    list_tag_stack.push(inherited);
+                }
+
+                Event::End(TagEnd::List(_)) => {
+                    list_tag_stack.pop();
+                }
+
+                Event::Start(Tag::Item) => {
+                    item_stack.push(String::new());
+                    item_tag_stack.push(Vec::new());
+                }
+
+                Event::End(TagEnd::Item) => {
+                    let item_text = item_stack.pop().unwrap_or_default();
+                    let mut item_tags = item_tag_stack.pop().unwrap_or_default();
+                    let text_tags = extract_tags(&item_text);
+                    extend_unique(&mut item_tags, text_tags);
+
+                    let mut all_tags = section_stack.current_tags();
+                    if let Some(list_tags) = list_tag_stack.last() {
+                        extend_unique(&mut all_tags, list_tags.clone());
+                    }
+                    extend_unique(&mut all_tags, item_tags);
+
+                    let content_clean = strip_tags(&item_text);
+                    if !content_clean.trim().is_empty() && !all_tags.is_empty() {
+                        results.push(TaggedContent::new(
+                            all_tags,
+                            content_clean,
+                            source_file.to_path_buf(),
+                            date,
+                            section_stack
+                                .current_context()
+                                .unwrap_or(TagContext::Paragraph),
+                        ));
+                    }
+                }
+
                 Event::Start(Tag::Heading { level, .. }) => {
                     in_heading = true;
                     current_heading_level = level as usize;
                     current_heading_text.clear();
+                    pending_list_tags = None;
                 }
 
                 Event::End(TagEnd::Heading(_)) => {
@@ -190,6 +257,7 @@ impl TagParser {
                 Event::Start(Tag::Paragraph) => {
                     in_paragraph = true;
                     current_paragraph.clear();
+                    pending_list_tags = None;
                 }
 
                 Event::End(TagEnd::Paragraph) => {
@@ -198,18 +266,24 @@ impl TagParser {
                     // Extract paragraph-level tags (at end of paragraph)
                     let para_tags = extract_tags(&current_paragraph);
 
-                    if !para_tags.is_empty() {
-                        // Paragraph has its own tags - combine with inherited section tags
+                    if let Some(item_tags) = item_tag_stack.last_mut() {
+                        extend_unique(item_tags, para_tags.clone());
+                    }
+
+                    let content_clean = strip_tags(&current_paragraph);
+
+                    if content_clean.trim().is_empty() && !para_tags.is_empty() {
+                        // Tag-only paragraph can act as a list tag context for a following list
+                        pending_list_tags = Some(para_tags);
+                    } else {
+                        // Paragraph has tags or inherits tags from section or list
                         let mut all_tags = section_stack.current_tags();
-                        for tag in para_tags {
-                            if !all_tags.contains(&tag) {
-                                all_tags.push(tag);
-                            }
+                        if let Some(list_tags) = list_tag_stack.last() {
+                            extend_unique(&mut all_tags, list_tags.clone());
                         }
+                        extend_unique(&mut all_tags, para_tags);
 
-                        let content_clean = strip_tags(&current_paragraph);
-
-                        if !content_clean.trim().is_empty() {
+                        if !content_clean.trim().is_empty() && !all_tags.is_empty() {
                             results.push(TaggedContent::new(
                                 all_tags,
                                 content_clean,
@@ -220,6 +294,7 @@ impl TagParser {
                                     .unwrap_or(TagContext::Paragraph),
                             ));
                         }
+                        pending_list_tags = None;
                     }
                 }
 
@@ -228,6 +303,8 @@ impl TagParser {
                         current_heading_text.push_str(&text);
                     } else if in_paragraph {
                         current_paragraph.push_str(&text);
+                    } else if let Some(item_text) = item_stack.last_mut() {
+                        item_text.push_str(&text);
                     }
                 }
 
@@ -236,6 +313,10 @@ impl TagParser {
                         current_paragraph.push('`');
                         current_paragraph.push_str(&code);
                         current_paragraph.push('`');
+                    } else if let Some(item_text) = item_stack.last_mut() {
+                        item_text.push('`');
+                        item_text.push_str(&code);
+                        item_text.push('`');
                     }
                 }
 
@@ -244,6 +325,8 @@ impl TagParser {
                         current_heading_text.push(' ');
                     } else if in_paragraph {
                         current_paragraph.push('\n');
+                    } else if let Some(item_text) = item_stack.last_mut() {
+                        item_text.push('\n');
                     }
                 }
 
@@ -337,10 +420,20 @@ Action items assigned.
 
         let results = TagParser::extract_from_markdown(markdown, Path::new("test.md"), None);
 
-        // Should have one tagged content for the heading
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].tags, vec!["work", "urgent"]);
-        assert_eq!(results[0].content, "Meeting Notes");
+        let heading = results
+            .iter()
+            .find(|r| {
+                matches!(&r.context, TagContext::Section { heading, .. } if heading == "Meeting Notes")
+            })
+            .unwrap();
+        assert_eq!(heading.tags, vec!["work", "urgent"]);
+        assert_eq!(heading.content, "Meeting Notes");
+
+        let paragraph = results
+            .iter()
+            .find(|r| r.content.contains("Discussed project timeline."))
+            .unwrap();
+        assert_eq!(paragraph.tags, vec!["work", "urgent"]);
     }
 
     #[test]
@@ -375,17 +468,29 @@ Critical path items.
 
         let results = TagParser::extract_from_markdown(markdown, Path::new("test.md"), None);
 
-        // Should have 3 headings with tags
-        assert!(results.len() >= 3);
+        let project = results
+            .iter()
+            .find(|r| {
+                matches!(&r.context, TagContext::Section { heading, .. } if heading == "Project Alpha")
+            })
+            .unwrap();
+        assert_eq!(project.tags, vec!["project-alpha"]);
 
-        // First heading: just #project-alpha
-        assert_eq!(results[0].tags, vec!["project-alpha"]);
+        let sprint = results
+            .iter()
+            .find(|r| {
+                matches!(&r.context, TagContext::Section { heading, .. } if heading == "Sprint Planning")
+            })
+            .unwrap();
+        assert_eq!(sprint.tags, vec!["project-alpha", "work"]);
 
-        // Second heading: inherits #project-alpha, adds #work
-        assert_eq!(results[1].tags, vec!["project-alpha", "work"]);
-
-        // Third heading: inherits both, adds #urgent
-        assert_eq!(results[2].tags, vec!["project-alpha", "work", "urgent"]);
+        let tasks = results
+            .iter()
+            .find(|r| {
+                matches!(&r.context, TagContext::Section { heading, .. } if heading == "Tasks")
+            })
+            .unwrap();
+        assert_eq!(tasks.tags, vec!["project-alpha", "work", "urgent"]);
     }
 
     #[test]
@@ -534,5 +639,79 @@ Use the `git commit` command here. #git #tutorial
         assert!(results[0].tags.contains(&"diary".to_string()));
         // The "I" should not be consumed by the tag
         assert!(results[0].content.contains("I am planning"));
+    }
+
+    #[test]
+    fn test_heading_tag_applies_to_list_items() {
+        let markdown = r#"
+#tag
+  - item 1
+  - item 2
+  - item 3
+"#;
+
+        let results = TagParser::extract_from_markdown(markdown, Path::new("test.md"), None);
+
+        let has_item_1 = results
+            .iter()
+            .any(|r| r.tags.contains(&"tag".to_string()) && r.content.contains("item 1"));
+        let has_item_2 = results
+            .iter()
+            .any(|r| r.tags.contains(&"tag".to_string()) && r.content.contains("item 2"));
+        let has_item_3 = results
+            .iter()
+            .any(|r| r.tags.contains(&"tag".to_string()) && r.content.contains("item 3"));
+
+        assert!(has_item_1);
+        assert!(has_item_2);
+        assert!(has_item_3);
+    }
+
+    #[test]
+    fn test_list_item_tag_applies_to_subitems() {
+        let markdown = r#"
+- #tag
+  - item 1
+  - item 2
+  - item 3
+"#;
+
+        let results = TagParser::extract_from_markdown(markdown, Path::new("test.md"), None);
+
+        let tagged: Vec<&TaggedContent> = results
+            .iter()
+            .filter(|r| r.tags.contains(&"tag".to_string()))
+            .collect();
+        assert!(!tagged.is_empty());
+
+        let combined = tagged
+            .iter()
+            .map(|r| r.content.as_str())
+            .collect::<Vec<&str>>()
+            .join("\n");
+        assert!(combined.contains("item 1"));
+        assert!(combined.contains("item 2"));
+        assert!(combined.contains("item 3"));
+    }
+
+    #[test]
+    fn test_section_tag_includes_untagged_paragraphs() {
+        let markdown = r#"
+### #crs
+
+lskfjlskdjflksdjflk
+lsdkfjlskdjflksdjflk
+lksdjflksjdlfkjsldfkj
+"#;
+
+        let results = TagParser::extract_from_markdown(markdown, Path::new("test.md"), None);
+
+        let has_paragraph = results.iter().any(|r| {
+            r.tags.contains(&"crs".to_string())
+                && r.content.contains("lskfjlskdjflksdjflk")
+                && r.content.contains("lsdkfjlskdjflksdjflk")
+                && r.content.contains("lksdjflksjdlfkjsldfkj")
+        });
+        assert!(has_paragraph);
     }
 }
