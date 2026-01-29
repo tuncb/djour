@@ -2,19 +2,16 @@
 
 #![allow(deprecated)]
 
-use assert_cmd::Command;
 use predicates::prelude::*;
 use std::fs;
 use tempfile::TempDir;
 
+mod common;
+use common::djour_cmd;
+
 /// Helper to initialize a test journal
 fn init_journal(temp: &TempDir) {
-    Command::cargo_bin("djour")
-        .unwrap()
-        .arg("init")
-        .arg(temp.path())
-        .assert()
-        .success();
+    djour_cmd().arg("init").arg(temp.path()).assert().success();
 }
 
 /// Helper to create a note file with content
@@ -38,8 +35,7 @@ Meeting at 10am with team. #work",
     );
 
     // Compile work tag
-    Command::cargo_bin("djour")
-        .unwrap()
+    djour_cmd()
         .current_dir(temp.path())
         .arg("compile")
         .arg("work")
@@ -80,8 +76,7 @@ Regular task here. #work",
     );
 
     // Compile with AND query
-    Command::cargo_bin("djour")
-        .unwrap()
+    djour_cmd()
         .current_dir(temp.path())
         .arg("compile")
         .arg("work AND urgent")
@@ -108,8 +103,7 @@ fn test_compile_or_query() {
     create_note(&temp, "2025-01-17.md", "Hobby content. #hobby");
 
     // Compile with OR query
-    Command::cargo_bin("djour")
-        .unwrap()
+    djour_cmd()
         .current_dir(temp.path())
         .arg("compile")
         .arg("work OR personal")
@@ -136,8 +130,7 @@ fn test_compile_not_query() {
     create_note(&temp, "2025-01-16.md", "Coding notes. #work #coding");
 
     // Compile with NOT query
-    Command::cargo_bin("djour")
-        .unwrap()
+    djour_cmd()
         .current_dir(temp.path())
         .arg("compile")
         .arg("work AND NOT meeting")
@@ -164,8 +157,7 @@ fn test_compile_with_date_filtering() {
     create_note(&temp, "2025-01-20.md", "New work. #work");
 
     // Compile with date range
-    Command::cargo_bin("djour")
-        .unwrap()
+    djour_cmd()
         .current_dir(temp.path())
         .arg("compile")
         .arg("work")
@@ -196,8 +188,7 @@ fn test_compile_format_chronological() {
     create_note(&temp, "2025-01-16.md", "## Work #work\nSecond day.");
 
     // Compile with chronological format (default)
-    Command::cargo_bin("djour")
-        .unwrap()
+    djour_cmd()
         .current_dir(temp.path())
         .arg("compile")
         .arg("work")
@@ -223,8 +214,7 @@ fn test_compile_format_grouped() {
     create_note(&temp, "2025-01-16.md", "## Work #work\nSecond file.");
 
     // Compile with grouped format
-    Command::cargo_bin("djour")
-        .unwrap()
+    djour_cmd()
         .current_dir(temp.path())
         .arg("compile")
         .arg("work")
@@ -257,8 +247,7 @@ Meeting notes here.",
     );
 
     // Compile with context
-    Command::cargo_bin("djour")
-        .unwrap()
+    djour_cmd()
         .current_dir(temp.path())
         .arg("compile")
         .arg("work")
@@ -286,8 +275,7 @@ fn test_compile_custom_output_path() {
     fs::create_dir(&custom_dir).unwrap();
 
     // Compile with custom output
-    Command::cargo_bin("djour")
-        .unwrap()
+    djour_cmd()
         .current_dir(temp.path())
         .arg("compile")
         .arg("work")
@@ -310,8 +298,7 @@ fn test_compile_empty_query_fails() {
     init_journal(&temp);
 
     // Try to compile with empty query
-    Command::cargo_bin("djour")
-        .unwrap()
+    djour_cmd()
         .current_dir(temp.path())
         .arg("compile")
         .arg("")
@@ -329,8 +316,7 @@ fn test_compile_no_matches_fails() {
     create_note(&temp, "2025-01-15.md", "## Personal #personal\nSome notes.");
 
     // Try to compile non-existent tag
-    Command::cargo_bin("djour")
-        .unwrap()
+    djour_cmd()
         .current_dir(temp.path())
         .arg("compile")
         .arg("nonexistent")
@@ -348,8 +334,7 @@ fn test_compile_invalid_format_fails() {
     create_note(&temp, "2025-01-15.md", "## Work #work\nSome work.");
 
     // Try to compile with invalid format
-    Command::cargo_bin("djour")
-        .unwrap()
+    djour_cmd()
         .current_dir(temp.path())
         .arg("compile")
         .arg("work")
@@ -369,8 +354,7 @@ fn test_compile_invalid_date_fails() {
     create_note(&temp, "2025-01-15.md", "## Work #work\nSome work.");
 
     // Try to compile with invalid date
-    Command::cargo_bin("djour")
-        .unwrap()
+    djour_cmd()
         .current_dir(temp.path())
         .arg("compile")
         .arg("work")
@@ -387,8 +371,7 @@ fn test_compile_not_djour_directory_fails() {
     // Don't initialize - not a djour directory
 
     // Try to compile
-    Command::cargo_bin("djour")
-        .unwrap()
+    djour_cmd()
         .current_dir(temp.path())
         .arg("compile")
         .arg("work")
@@ -416,8 +399,7 @@ Third thought about work again. #work",
     );
 
     // Compile work tag
-    Command::cargo_bin("djour")
-        .unwrap()
+    djour_cmd()
         .current_dir(temp.path())
         .arg("compile")
         .arg("work")
@@ -449,8 +431,7 @@ This inherits the work tag from parent section. #note",
     );
 
     // Compile work tag
-    Command::cargo_bin("djour")
-        .unwrap()
+    djour_cmd()
         .current_dir(temp.path())
         .arg("compile")
         .arg("work")

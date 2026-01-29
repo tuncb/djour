@@ -172,8 +172,10 @@ impl TagCompiler {
             // Context heading (if available and requested)
             if include_context {
                 if let TagContext::Section { heading, level } = &tc.context {
-                    let prefix = "#".repeat(*level + 2); // Base level 2 (##) + section level
-                    output.push_str(&format!("{} {}\n\n", prefix, heading));
+                    if !heading.trim().is_empty() {
+                        let prefix = "#".repeat(*level + 2); // Base level 2 (##) + section level
+                        output.push_str(&format!("{} {}\n\n", prefix, heading));
+                    }
                 }
             }
 
@@ -194,8 +196,10 @@ impl TagCompiler {
                 // Context heading (if available and requested)
                 if include_context {
                     if let TagContext::Section { heading, level } = &tc.context {
-                        let prefix = "#".repeat(*level + 2); // Base level 2 (##) + section level
-                        output.push_str(&format!("{} {}\n\n", prefix, heading));
+                        if !heading.trim().is_empty() {
+                            let prefix = "#".repeat(*level + 2); // Base level 2 (##) + section level
+                            output.push_str(&format!("{} {}\n\n", prefix, heading));
+                        }
                     }
                 }
 

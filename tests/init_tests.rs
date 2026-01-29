@@ -2,21 +2,18 @@
 
 #![allow(deprecated)]
 
-use assert_cmd::Command;
 use predicates::prelude::*;
 use std::fs;
 use tempfile::TempDir;
+
+mod common;
+use common::djour_cmd;
 
 #[test]
 fn test_init_creates_config() {
     let temp = TempDir::new().unwrap();
 
-    Command::cargo_bin("djour")
-        .unwrap()
-        .arg("init")
-        .arg(temp.path())
-        .assert()
-        .success();
+    djour_cmd().arg("init").arg(temp.path()).assert().success();
 
     // Check .djour directory exists
     assert!(temp.path().join(".djour").exists());
@@ -34,8 +31,7 @@ fn test_init_creates_config() {
 fn test_init_with_weekly_mode() {
     let temp = TempDir::new().unwrap();
 
-    Command::cargo_bin("djour")
-        .unwrap()
+    djour_cmd()
         .arg("init")
         .arg(temp.path())
         .arg("--mode")
@@ -53,20 +49,10 @@ fn test_init_already_initialized_fails() {
     let temp = TempDir::new().unwrap();
 
     // First init succeeds
-    Command::cargo_bin("djour")
-        .unwrap()
-        .arg("init")
-        .arg(temp.path())
-        .assert()
-        .success();
+    djour_cmd().arg("init").arg(temp.path()).assert().success();
 
     // Second init fails
-    Command::cargo_bin("djour")
-        .unwrap()
-        .arg("init")
-        .arg(temp.path())
-        .assert()
-        .failure();
+    djour_cmd().arg("init").arg(temp.path()).assert().failure();
 }
 
 #[test]
@@ -74,16 +60,10 @@ fn test_config_get_mode() {
     let temp = TempDir::new().unwrap();
 
     // Initialize
-    Command::cargo_bin("djour")
-        .unwrap()
-        .arg("init")
-        .arg(temp.path())
-        .assert()
-        .success();
+    djour_cmd().arg("init").arg(temp.path()).assert().success();
 
     // Get mode
-    Command::cargo_bin("djour")
-        .unwrap()
+    djour_cmd()
         .current_dir(temp.path())
         .arg("config")
         .arg("mode")
@@ -97,16 +77,10 @@ fn test_config_set_mode() {
     let temp = TempDir::new().unwrap();
 
     // Initialize
-    Command::cargo_bin("djour")
-        .unwrap()
-        .arg("init")
-        .arg(temp.path())
-        .assert()
-        .success();
+    djour_cmd().arg("init").arg(temp.path()).assert().success();
 
     // Set mode to weekly
-    Command::cargo_bin("djour")
-        .unwrap()
+    djour_cmd()
         .current_dir(temp.path())
         .arg("config")
         .arg("mode")
@@ -115,8 +89,7 @@ fn test_config_set_mode() {
         .success();
 
     // Verify it was set
-    Command::cargo_bin("djour")
-        .unwrap()
+    djour_cmd()
         .current_dir(temp.path())
         .arg("config")
         .arg("mode")
@@ -129,15 +102,9 @@ fn test_config_set_mode() {
 fn test_config_list() {
     let temp = TempDir::new().unwrap();
 
-    Command::cargo_bin("djour")
-        .unwrap()
-        .arg("init")
-        .arg(temp.path())
-        .assert()
-        .success();
+    djour_cmd().arg("init").arg(temp.path()).assert().success();
 
-    Command::cargo_bin("djour")
-        .unwrap()
+    djour_cmd()
         .current_dir(temp.path())
         .arg("config")
         .arg("--list")

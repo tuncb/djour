@@ -239,8 +239,8 @@ impl TagParser {
                         heading_tags.clone(),
                     );
 
-                    // If heading has tags, create tagged content for the heading itself
-                    if !heading_tags.is_empty() {
+                    // If heading has tags, create tagged content for the heading itself (if any text)
+                    if !heading_tags.is_empty() && !heading_clean.trim().is_empty() {
                         results.push(TaggedContent::new(
                             section_stack.current_tags(),
                             heading_clean.clone(),
@@ -713,5 +713,22 @@ lksdjflksjdlfkjsldfkj
                 && r.content.contains("lksdjflksjdlfkjsldfkj")
         });
         assert!(has_paragraph);
+    }
+
+    #[test]
+    fn test_heading_only_tag_does_not_create_empty_content() {
+        let markdown = r#"
+### #codex
+
+Some content under the heading.
+"#;
+
+        let results = TagParser::extract_from_markdown(markdown, Path::new("test.md"), None);
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0]
+            .content
+            .contains("Some content under the heading."));
+        assert!(!results[0].content.trim().is_empty());
     }
 }

@@ -2,26 +2,22 @@
 
 #![allow(deprecated)]
 
-use assert_cmd::Command;
 use predicates::prelude::*;
 use std::fs;
 use tempfile::TempDir;
+
+mod common;
+use common::djour_cmd;
 
 #[test]
 fn test_list_no_notes() {
     let temp = TempDir::new().unwrap();
 
     // Initialize
-    Command::cargo_bin("djour")
-        .unwrap()
-        .arg("init")
-        .arg(temp.path())
-        .assert()
-        .success();
+    djour_cmd().arg("init").arg(temp.path()).assert().success();
 
     // List should show no notes
-    Command::cargo_bin("djour")
-        .unwrap()
+    djour_cmd()
         .current_dir(temp.path())
         .arg("list")
         .assert()
@@ -34,12 +30,7 @@ fn test_list_with_notes() {
     let temp = TempDir::new().unwrap();
 
     // Initialize
-    Command::cargo_bin("djour")
-        .unwrap()
-        .arg("init")
-        .arg(temp.path())
-        .assert()
-        .success();
+    djour_cmd().arg("init").arg(temp.path()).assert().success();
 
     // Create some note files
     fs::write(temp.path().join("2025-01-17.md"), "note 1").unwrap();
@@ -47,8 +38,7 @@ fn test_list_with_notes() {
     fs::write(temp.path().join("2025-01-15.md"), "note 3").unwrap();
 
     // List should show all notes
-    Command::cargo_bin("djour")
-        .unwrap()
+    djour_cmd()
         .current_dir(temp.path())
         .arg("list")
         .assert()
@@ -62,19 +52,13 @@ fn test_list_with_notes() {
 fn test_list_sorted_newest_first() {
     let temp = TempDir::new().unwrap();
 
-    Command::cargo_bin("djour")
-        .unwrap()
-        .arg("init")
-        .arg(temp.path())
-        .assert()
-        .success();
+    djour_cmd().arg("init").arg(temp.path()).assert().success();
 
     fs::write(temp.path().join("2025-01-15.md"), "note").unwrap();
     fs::write(temp.path().join("2025-01-20.md"), "note").unwrap();
     fs::write(temp.path().join("2025-01-10.md"), "note").unwrap();
 
-    let output = Command::cargo_bin("djour")
-        .unwrap()
+    let output = djour_cmd()
         .current_dir(temp.path())
         .arg("list")
         .output()
@@ -94,20 +78,14 @@ fn test_list_sorted_newest_first() {
 fn test_list_with_date_range() {
     let temp = TempDir::new().unwrap();
 
-    Command::cargo_bin("djour")
-        .unwrap()
-        .arg("init")
-        .arg(temp.path())
-        .assert()
-        .success();
+    djour_cmd().arg("init").arg(temp.path()).assert().success();
 
     fs::write(temp.path().join("2025-01-10.md"), "note").unwrap();
     fs::write(temp.path().join("2025-01-15.md"), "note").unwrap();
     fs::write(temp.path().join("2025-01-20.md"), "note").unwrap();
 
     // List with date range
-    Command::cargo_bin("djour")
-        .unwrap()
+    djour_cmd()
         .current_dir(temp.path())
         .arg("list")
         .arg("--from")
@@ -125,19 +103,13 @@ fn test_list_with_date_range() {
 fn test_list_with_from_only() {
     let temp = TempDir::new().unwrap();
 
-    Command::cargo_bin("djour")
-        .unwrap()
-        .arg("init")
-        .arg(temp.path())
-        .assert()
-        .success();
+    djour_cmd().arg("init").arg(temp.path()).assert().success();
 
     fs::write(temp.path().join("2025-01-10.md"), "note").unwrap();
     fs::write(temp.path().join("2025-01-15.md"), "note").unwrap();
     fs::write(temp.path().join("2025-01-20.md"), "note").unwrap();
 
-    Command::cargo_bin("djour")
-        .unwrap()
+    djour_cmd()
         .current_dir(temp.path())
         .arg("list")
         .arg("--from")
@@ -153,19 +125,13 @@ fn test_list_with_from_only() {
 fn test_list_with_to_only() {
     let temp = TempDir::new().unwrap();
 
-    Command::cargo_bin("djour")
-        .unwrap()
-        .arg("init")
-        .arg(temp.path())
-        .assert()
-        .success();
+    djour_cmd().arg("init").arg(temp.path()).assert().success();
 
     fs::write(temp.path().join("2025-01-10.md"), "note").unwrap();
     fs::write(temp.path().join("2025-01-15.md"), "note").unwrap();
     fs::write(temp.path().join("2025-01-20.md"), "note").unwrap();
 
-    Command::cargo_bin("djour")
-        .unwrap()
+    djour_cmd()
         .current_dir(temp.path())
         .arg("list")
         .arg("--to")
@@ -181,12 +147,7 @@ fn test_list_with_to_only() {
 fn test_list_with_limit() {
     let temp = TempDir::new().unwrap();
 
-    Command::cargo_bin("djour")
-        .unwrap()
-        .arg("init")
-        .arg(temp.path())
-        .assert()
-        .success();
+    djour_cmd().arg("init").arg(temp.path()).assert().success();
 
     // Create 5 notes
     for day in 1..=5 {
@@ -195,8 +156,7 @@ fn test_list_with_limit() {
     }
 
     // List with limit 2
-    let output = Command::cargo_bin("djour")
-        .unwrap()
+    let output = djour_cmd()
         .current_dir(temp.path())
         .arg("list")
         .arg("--limit")
@@ -217,12 +177,7 @@ fn test_list_with_limit() {
 fn test_list_default_limit() {
     let temp = TempDir::new().unwrap();
 
-    Command::cargo_bin("djour")
-        .unwrap()
-        .arg("init")
-        .arg(temp.path())
-        .assert()
-        .success();
+    djour_cmd().arg("init").arg(temp.path()).assert().success();
 
     // Create 15 notes
     for day in 1..=15 {
@@ -231,8 +186,7 @@ fn test_list_default_limit() {
     }
 
     // List without limit should default to 10
-    let output = Command::cargo_bin("djour")
-        .unwrap()
+    let output = djour_cmd()
         .current_dir(temp.path())
         .arg("list")
         .output()
@@ -249,16 +203,10 @@ fn test_list_default_limit() {
 fn test_list_invalid_date_format() {
     let temp = TempDir::new().unwrap();
 
-    Command::cargo_bin("djour")
-        .unwrap()
-        .arg("init")
-        .arg(temp.path())
-        .assert()
-        .success();
+    djour_cmd().arg("init").arg(temp.path()).assert().success();
 
     // Invalid date format should error
-    Command::cargo_bin("djour")
-        .unwrap()
+    djour_cmd()
         .current_dir(temp.path())
         .arg("list")
         .arg("--from")
@@ -273,8 +221,7 @@ fn test_list_weekly_mode() {
     let temp = TempDir::new().unwrap();
 
     // Initialize with weekly mode
-    Command::cargo_bin("djour")
-        .unwrap()
+    djour_cmd()
         .arg("init")
         .arg(temp.path())
         .arg("--mode")
@@ -287,8 +234,7 @@ fn test_list_weekly_mode() {
     fs::write(temp.path().join("2025-W02-2025-01-06.md"), "week 2").unwrap();
 
     // Should list both
-    Command::cargo_bin("djour")
-        .unwrap()
+    djour_cmd()
         .current_dir(temp.path())
         .arg("list")
         .assert()
@@ -302,8 +248,7 @@ fn test_list_monthly_mode() {
     let temp = TempDir::new().unwrap();
 
     // Initialize with monthly mode
-    Command::cargo_bin("djour")
-        .unwrap()
+    djour_cmd()
         .arg("init")
         .arg(temp.path())
         .arg("--mode")
@@ -316,8 +261,7 @@ fn test_list_monthly_mode() {
     fs::write(temp.path().join("2024-12.md"), "dec").unwrap();
 
     // Should list both
-    Command::cargo_bin("djour")
-        .unwrap()
+    djour_cmd()
         .current_dir(temp.path())
         .arg("list")
         .assert()
@@ -331,8 +275,7 @@ fn test_list_single_mode() {
     let temp = TempDir::new().unwrap();
 
     // Initialize with single mode
-    Command::cargo_bin("djour")
-        .unwrap()
+    djour_cmd()
         .arg("init")
         .arg(temp.path())
         .arg("--mode")
@@ -342,8 +285,7 @@ fn test_list_single_mode() {
 
     fs::write(temp.path().join("journal.md"), "entry").unwrap();
 
-    Command::cargo_bin("djour")
-        .unwrap()
+    djour_cmd()
         .current_dir(temp.path())
         .arg("list")
         .assert()
@@ -355,20 +297,14 @@ fn test_list_single_mode() {
 fn test_list_ignores_other_files() {
     let temp = TempDir::new().unwrap();
 
-    Command::cargo_bin("djour")
-        .unwrap()
-        .arg("init")
-        .arg(temp.path())
-        .assert()
-        .success();
+    djour_cmd().arg("init").arg(temp.path()).assert().success();
 
     // Create note files and other files
     fs::write(temp.path().join("2025-01-17.md"), "note").unwrap();
     fs::write(temp.path().join("readme.txt"), "text").unwrap();
     fs::write(temp.path().join("invalid.md"), "bad").unwrap();
 
-    let output = Command::cargo_bin("djour")
-        .unwrap()
+    let output = djour_cmd()
         .current_dir(temp.path())
         .arg("list")
         .output()
@@ -387,8 +323,7 @@ fn test_list_not_in_djour_directory() {
     let temp = TempDir::new().unwrap();
 
     // Try to list without initializing
-    Command::cargo_bin("djour")
-        .unwrap()
+    djour_cmd()
         .current_dir(temp.path())
         .arg("list")
         .assert()
@@ -399,12 +334,7 @@ fn test_list_not_in_djour_directory() {
 fn test_list_combined_filters() {
     let temp = TempDir::new().unwrap();
 
-    Command::cargo_bin("djour")
-        .unwrap()
-        .arg("init")
-        .arg(temp.path())
-        .assert()
-        .success();
+    djour_cmd().arg("init").arg(temp.path()).assert().success();
 
     // Create several notes
     for day in 10..=20 {
@@ -413,8 +343,7 @@ fn test_list_combined_filters() {
     }
 
     // Test combining date range and limit
-    let output = Command::cargo_bin("djour")
-        .unwrap()
+    let output = djour_cmd()
         .current_dir(temp.path())
         .arg("list")
         .arg("--from")
