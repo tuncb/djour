@@ -1,7 +1,7 @@
 //! Tag parsing from markdown
 
 use chrono::NaiveDate;
-use pulldown_cmark::{Event, Parser as MdParser, Tag, TagEnd};
+use pulldown_cmark::{CodeBlockKind, Event, Parser as MdParser, Tag, TagEnd};
 use regex::Regex;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -153,6 +153,10 @@ impl TagParser {
         let mut in_heading = false;
         let mut current_heading_text = String::new();
         let mut current_heading_level = 0;
+        let mut in_code_block = false;
+        let mut code_block_info = String::new();
+        let mut code_block_text = String::new();
+        let mut pending_code_block_target: Option<usize> = None;
 
         let extend_unique = |dest: &mut Vec<String>, tags: Vec<String>| {
             for tag in tags {
@@ -165,6 +169,7 @@ impl TagParser {
         for event in parser {
             match event {
                 Event::Start(Tag::List(_)) => {
+                    pending_code_block_target = None;
                     // Establish list-level inherited tags (from parent list item, if any)
                     let mut inherited = if item_stack.is_empty() {
                         pending_list_tags.take().unwrap_or_default()
@@ -188,6 +193,7 @@ impl TagParser {
                 }
 
                 Event::Start(Tag::Item) => {
+                    pending_code_block_target = None;
                     item_stack.push(String::new());
                     item_tag_stack.push(Vec::new());
                 }
@@ -219,6 +225,7 @@ impl TagParser {
                 }
 
                 Event::Start(Tag::Heading { level, .. }) => {
+                    pending_code_block_target = None;
                     in_heading = true;
                     current_heading_level = level as usize;
                     current_heading_text.clear();
@@ -255,6 +262,7 @@ impl TagParser {
                 }
 
                 Event::Start(Tag::Paragraph) => {
+                    pending_code_block_target = None;
                     in_paragraph = true;
                     current_paragraph.clear();
                     pending_list_tags = None;
@@ -293,13 +301,16 @@ impl TagParser {
                                     .current_context()
                                     .unwrap_or(TagContext::Paragraph),
                             ));
+                            pending_code_block_target = Some(results.len() - 1);
                         }
                         pending_list_tags = None;
                     }
                 }
 
                 Event::Text(text) => {
-                    if in_heading {
+                    if in_code_block {
+                        code_block_text.push_str(&text);
+                    } else if in_heading {
                         current_heading_text.push_str(&text);
                     } else if in_paragraph {
                         current_paragraph.push_str(&text);
@@ -320,8 +331,64 @@ impl TagParser {
                     }
                 }
 
+                Event::Start(Tag::CodeBlock(kind)) => {
+                    in_code_block = true;
+                    code_block_text.clear();
+                    code_block_info = match kind {
+                        CodeBlockKind::Fenced(info) => info.to_string(),
+                        CodeBlockKind::Indented => String::new(),
+                    };
+                }
+
+                Event::End(TagEnd::CodeBlock) => {
+                    in_code_block = false;
+
+                    let mut fenced = String::new();
+                    fenced.push_str("```");
+                    if !code_block_info.trim().is_empty() {
+                        fenced.push_str(code_block_info.trim());
+                    }
+                    fenced.push('\n');
+                    fenced.push_str(&code_block_text);
+                    if !code_block_text.ends_with('\n') {
+                        fenced.push('\n');
+                    }
+                    fenced.push_str("```");
+
+                    if let Some(item_text) = item_stack.last_mut() {
+                        if !item_text.trim().is_empty() {
+                            item_text.push_str("\n\n");
+                        }
+                        item_text.push_str(&fenced);
+                    } else if let Some(idx) = pending_code_block_target {
+                        if !results[idx].content.trim().is_empty() {
+                            results[idx].content.push_str("\n\n");
+                        }
+                        results[idx].content.push_str(&fenced);
+                    } else {
+                        let mut all_tags = section_stack.current_tags();
+                        if let Some(list_tags) = list_tag_stack.last() {
+                            extend_unique(&mut all_tags, list_tags.clone());
+                        }
+
+                        if !all_tags.is_empty() {
+                            results.push(TaggedContent::new(
+                                all_tags,
+                                fenced,
+                                source_file.to_path_buf(),
+                                date,
+                                section_stack
+                                    .current_context()
+                                    .unwrap_or(TagContext::Paragraph),
+                            ));
+                        }
+                    }
+                }
+
                 Event::SoftBreak | Event::HardBreak => {
-                    if in_heading {
+                    if in_code_block {
+                        code_block_text.push('\n');
+                    } else if in_heading {
                         current_heading_text.push(' ');
                     } else if in_paragraph {
                         current_paragraph.push('\n');

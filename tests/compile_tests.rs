@@ -415,6 +415,74 @@ Third thought about work again. #work",
 }
 
 #[test]
+fn test_compile_tagged_caption_with_fenced_code_block() {
+    let temp = TempDir::new().unwrap();
+    init_journal(&temp);
+
+    create_note(
+        &temp,
+        "2025-01-15.md",
+        r#"## Snippets #work
+
+Code sample below. #work
+
+```rust
+fn hello() {
+    println!("hello");
+}
+```
+"#,
+    );
+
+    djour_cmd()
+        .current_dir(temp.path())
+        .arg("compile")
+        .arg("work")
+        .assert()
+        .success();
+
+    let output = temp.path().join("compilations/work.md");
+    let content = fs::read_to_string(output).unwrap();
+    assert!(content.contains("Code sample below."));
+    assert!(content.contains("```rust"));
+    assert!(content.contains("fn hello()"));
+    assert!(content.contains("```"));
+}
+
+#[test]
+fn test_compile_list_item_with_fenced_code_block() {
+    let temp = TempDir::new().unwrap();
+    init_journal(&temp);
+
+    create_note(
+        &temp,
+        "2025-01-15.md",
+        r#"## Snippets #work
+
+- Code sample #work
+
+  ```bash
+  echo "hi"
+  ```
+"#,
+    );
+
+    djour_cmd()
+        .current_dir(temp.path())
+        .arg("compile")
+        .arg("work")
+        .assert()
+        .success();
+
+    let output = temp.path().join("compilations/work.md");
+    let content = fs::read_to_string(output).unwrap();
+    assert!(content.contains("Code sample"));
+    assert!(content.contains("```bash"));
+    assert!(content.contains("echo \"hi\""));
+    assert!(content.contains("```"));
+}
+
+#[test]
 fn test_compile_tag_inheritance() {
     let temp = TempDir::new().unwrap();
     init_journal(&temp);
