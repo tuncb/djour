@@ -13,7 +13,7 @@ djour organizes markdown notes within a designated folder, handling file creatio
 | Mode | File Pattern | Description |
 |------|--------------|-------------|
 | `daily` | `YYYY-MM-DD.md` | One file per day |
-| `weekly` | `YYYY-Www.md` | One file per ISO week (e.g., `2025-W03.md`) |
+| `weekly` | `YYYY-Www-YYYY-MM-DD.md` | One file per ISO week (week start date included, e.g., `2025-W03-2025-01-13.md`) |
 | `monthly` | `YYYY-MM.md` | One file per month |
 | `single` | `journal.md` | All entries in one file |
 
@@ -25,7 +25,7 @@ djour organizes markdown notes within a designated folder, handling file creatio
 │   └── config.toml
 ├── 2025-01-15.md      # daily mode
 ├── 2025-01-16.md
-├── 2025-W03.md        # weekly mode
+├── 2025-W03-2025-01-13.md  # weekly mode
 ├── 2025-01.md         # monthly mode
 ├── journal.md         # single mode
 └── compilations/      # generated tag compilations
@@ -90,9 +90,9 @@ Opens the appropriate note file for the given time reference. Creates the file i
 
 In `weekly` mode, all day references resolve to that week's file:
 ```bash
-djour today       # Opens 2025-W03.md (current week)
-djour monday      # Opens 2025-W03.md (week containing that Monday)
-djour 2025-01-10  # Opens 2025-W02.md
+djour today       # Opens 2025-W03-2025-01-13.md (current week)
+djour monday      # Opens 2025-W03-2025-01-13.md (week containing that Monday)
+djour 2025-01-10  # Opens 2025-W02-2025-01-06.md
 ```
 
 In `monthly` mode, all day references resolve to that month's file:
@@ -158,6 +158,18 @@ djour config mode weekly       # Change to weekly mode
 djour config editor "code -w"  # Set VS Code as editor
 djour config --list            # Show all config
 ```
+
+### Mode Migration
+
+```bash
+djour mode <daily|weekly> [--dry-run] [--yes]
+```
+
+Changes the configured mode **and migrates existing notes** between `daily` and `weekly`.
+
+- Requires built-in templates (will refuse if `.djour/templates/daily.md` or `.djour/templates/weekly.md` exists)
+- Archives original files in `.djour/archive/mode-migration-<timestamp>/`
+- Requires `--yes` to apply changes (use `--dry-run` to preview)
 
 ---
 

@@ -82,4 +82,27 @@ pub enum Commands {
         #[arg(long)]
         include_context: bool,
     },
+
+    /// Change journal mode and migrate existing notes (daily <-> weekly)
+    Mode {
+        /// Target mode (daily or weekly)
+        #[arg(value_name = "MODE")]
+        to: String,
+
+        /// Override detected current mode (daily or weekly)
+        #[arg(long)]
+        from: Option<String>,
+
+        /// Show the migration plan without making changes
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Apply the migration (required unless --dry-run)
+        #[arg(long)]
+        yes: bool,
+
+        /// Archive directory (relative to journal root)
+        #[arg(long)]
+        archive_dir: Option<PathBuf>,
+    },
 }

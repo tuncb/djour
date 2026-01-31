@@ -69,7 +69,7 @@ djour init ~/my-journal --mode monthly
 
 **Journal Modes:**
 - `daily` - One file per day (`YYYY-MM-DD.md`)
-- `weekly` - One file per ISO week (`YYYY-Www.md`)
+- `weekly` - One file per ISO week (`YYYY-Www-YYYY-MM-DD.md`, week start date included)
 - `monthly` - One file per month (`YYYY-MM.md`)
 - `single` - All entries in one file (`journal.md`)
 
@@ -104,8 +104,8 @@ djour 2025-01-17
 
 In `weekly` mode, all day references resolve to that week's file:
 ```bash
-djour today       # Opens 2025-W03.md (current week)
-djour monday      # Opens 2025-W03.md (week containing that Monday)
+djour today       # Opens 2025-W03-2025-01-13.md (current week)
+djour monday      # Opens 2025-W03-2025-01-13.md (week containing that Monday)
 ```
 
 In `monthly` mode, all day references resolve to that month's file:
@@ -259,6 +259,12 @@ djour config mode
 # Change to weekly mode
 djour config mode weekly
 
+# Migrate from daily to weekly (converts existing notes, archives originals)
+djour mode weekly --yes
+
+# Preview what would change without modifying files
+djour mode weekly --dry-run
+
 # Set editor (overrides EDITOR environment variable)
 djour config editor "code -w"
 
@@ -322,6 +328,10 @@ Customize the structure of new notes by creating templates in `.djour/templates/
 ```
 
 If no custom template is found, djour falls back to built-in templates.
+
+Note: mode migration (`djour mode ...`) currently supports only `daily <-> weekly` and requires
+built-in templates (it will refuse to run if `.djour/templates/daily.md` or `.djour/templates/weekly.md`
+exists).
 
 ## Examples
 

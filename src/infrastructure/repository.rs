@@ -162,6 +162,96 @@ impl FileSystemRepository {
         fs::write(&path, content).map_err(DjourError::Io)
     }
 
+    /// Create a directory (and parents) relative to the repository root.
+    pub fn create_dir_all(&self, dir: &str) -> Result<()> {
+        let path = self.root.join(dir);
+        fs::create_dir_all(path).map_err(DjourError::Io)
+    }
+
+    /// Copy a note file (relative paths) within the repository.
+    pub fn copy_note(&self, from: &str, to: &str) -> Result<()> {
+        let from_path = self.root.join(from);
+        let to_path = self.root.join(to);
+
+        if !from_path.exists() {
+            return Err(DjourError::Config(format!(
+                "Cannot copy missing file: {}",
+                from_path.display()
+            )));
+        }
+
+        if let Some(parent) = to_path.parent() {
+            if !parent.exists() {
+                fs::create_dir_all(parent)?;
+            }
+        }
+
+        fs::copy(from_path, to_path)?;
+        Ok(())
+    }
+
+    /// Move (rename) a note file (relative paths) within the repository.
+    pub fn move_note(&self, from: &str, to: &str) -> Result<()> {
+        let from_path = self.root.join(from);
+        let to_path = self.root.join(to);
+
+        if !from_path.exists() {
+            return Err(DjourError::Config(format!(
+                "Cannot move missing file: {}",
+                from_path.display()
+            )));
+        }
+
+        if to_path.exists() {
+            return Err(DjourError::Config(format!(
+                "Destination already exists: {}",
+                to_path.display()
+            )));
+        }
+
+        if let Some(parent) = to_path.parent() {
+            if !parent.exists() {
+                fs::create_dir_all(parent)?;
+            }
+        }
+
+        fs::rename(from_path, to_path)?;
+        Ok(())
+    }
+
+    /// Write note content using a best-effort atomic replace:
+    /// write to a temp file in the same directory, then rename into place.
+    ///
+    /// On Windows, `rename` does not overwrite existing files, so we remove the destination first.
+    pub fn write_note_atomic(&self, filename: &str, content: &str) -> Result<()> {
+        let path = self.root.join(filename);
+
+        if let Some(parent) = path.parent() {
+            if !parent.exists() {
+                fs::create_dir_all(parent)?;
+            }
+        }
+
+        let tmp_name = format!(
+            "{}.djour-tmp-{}",
+            path.file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("note.md"),
+            std::process::id()
+        );
+        let tmp_path = path.with_file_name(tmp_name);
+
+        fs::write(&tmp_path, content)?;
+
+        if path.exists() {
+            // Best-effort atomic-ish replacement; we rely on archive backups for rollback.
+            fs::remove_file(&path)?;
+        }
+
+        fs::rename(&tmp_path, &path)?;
+        Ok(())
+    }
+
     /// List all note files for the given mode
     /// Filters and sorts by date, applying optional date range and limit
     pub fn list_notes(
@@ -406,6 +496,43 @@ mod tests {
         // Verify content
         let read_content = fs::read_to_string(note_path).unwrap();
         assert_eq!(read_content, content);
+    }
+
+    #[test]
+    fn test_copy_note_copies_file() {
+        let temp = TempDir::new().unwrap();
+        let repo = FileSystemRepository::new(temp.path().to_path_buf());
+
+        repo.write_note("a.md", "hello").unwrap();
+        repo.copy_note("a.md", ".djour/archive/a.md").unwrap();
+
+        assert!(temp.path().join(".djour/archive/a.md").exists());
+        let copied = fs::read_to_string(temp.path().join(".djour/archive/a.md")).unwrap();
+        assert_eq!(copied, "hello");
+    }
+
+    #[test]
+    fn test_move_note_moves_file() {
+        let temp = TempDir::new().unwrap();
+        let repo = FileSystemRepository::new(temp.path().to_path_buf());
+
+        repo.write_note("a.md", "hello").unwrap();
+        repo.move_note("a.md", ".djour/archive/a.md").unwrap();
+
+        assert!(!temp.path().join("a.md").exists());
+        assert!(temp.path().join(".djour/archive/a.md").exists());
+    }
+
+    #[test]
+    fn test_write_note_atomic_overwrites() {
+        let temp = TempDir::new().unwrap();
+        let repo = FileSystemRepository::new(temp.path().to_path_buf());
+
+        repo.write_note("a.md", "one").unwrap();
+        repo.write_note_atomic("a.md", "two").unwrap();
+
+        let final_content = fs::read_to_string(temp.path().join("a.md")).unwrap();
+        assert_eq!(final_content, "two");
     }
 
     #[test]

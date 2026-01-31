@@ -2,7 +2,7 @@ use chrono::NaiveDate;
 use clap::Parser;
 use djour::application::{
     init::InitService, manage_config::ConfigService, CompileOptions, CompileTagsService,
-    ListNotesService, OpenNoteService,
+    ListNotesService, MigrateModeService, ModeMigrationOptions, OpenNoteService,
 };
 use djour::cli::{format_note_list, Cli, Commands};
 use djour::domain::tags::CompilationFormat;
@@ -154,6 +154,32 @@ fn run(cli: Cli) -> Result<(), DjourError> {
             println!("Compiled tags to: {}", output_path.to_string_lossy());
 
             Ok(())
+        }
+        Some(Commands::Mode {
+            to,
+            from,
+            dry_run,
+            yes,
+            archive_dir,
+        }) => {
+            let repo = FileSystemRepository::discover()?;
+            let service = MigrateModeService::new(repo);
+
+            let to_mode = JournalMode::from_str(&to).map_err(DjourError::Config)?;
+            let from_mode = match from {
+                Some(s) => Some(JournalMode::from_str(&s).map_err(DjourError::Config)?),
+                None => None,
+            };
+
+            let options = ModeMigrationOptions {
+                to_mode,
+                from_mode,
+                dry_run,
+                yes,
+                archive_dir,
+            };
+
+            service.execute(options)
         }
         None => {
             // Check if time_ref provided (open command)
