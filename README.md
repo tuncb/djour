@@ -87,7 +87,7 @@ djour tomorrow
 djour monday
 djour friday
 
-# Relative weekdays
+# Relative weekdays (previous/next occurrence)
 djour last monday
 djour next wednesday
 

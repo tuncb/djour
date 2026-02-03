@@ -14,9 +14,9 @@ pub enum TimeReference {
     Tomorrow,
     /// Current/most recent occurrence of a weekday
     Weekday(Weekday),
-    /// Previous week's occurrence of a weekday
+    /// Previous occurrence of a weekday (strictly before today)
     LastWeekday(Weekday),
-    /// Next week's occurrence of a weekday
+    /// Next occurrence of a weekday (strictly after today)
     NextWeekday(Weekday),
     /// Specific date
     SpecificDate(NaiveDate),
@@ -113,7 +113,7 @@ impl TimeReference {
                 }
             }
             WeekdayOffset::Last => {
-                // Always go to previous week's occurrence
+                // Previous occurrence (strictly before today)
                 let days_back = if current_day == target_day {
                     7 // If today is the target day, go back 7 days
                 } else {
@@ -123,13 +123,13 @@ impl TimeReference {
                     if days == 0 {
                         7
                     } else {
-                        days + 7
+                        days
                     }
                 };
                 base_date - Duration::days(days_back as i64)
             }
             WeekdayOffset::Next => {
-                // Go to next occurrence of target day (not including today)
+                // Next occurrence (strictly after today)
                 let days_forward = if current_day == target_day {
                     7 // If today is the target day, go forward 7 days
                 } else {
@@ -147,9 +147,9 @@ impl TimeReference {
 enum WeekdayOffset {
     /// Current or most recent occurrence
     Current,
-    /// Previous week's occurrence
+    /// Previous occurrence (strictly before today)
     Last,
-    /// Next week's occurrence
+    /// Next occurrence (strictly after today)
     Next,
 }
 
@@ -262,8 +262,8 @@ mod tests {
     fn test_resolve_last_weekday() {
         // Friday, Jan 17, 2025
         let base = NaiveDate::from_ymd_opt(2025, 1, 17).unwrap();
-        // "last monday" should return Monday, Jan 6, 2025
-        let expected = NaiveDate::from_ymd_opt(2025, 1, 6).unwrap();
+        // "last monday" should return Monday, Jan 13, 2025
+        let expected = NaiveDate::from_ymd_opt(2025, 1, 13).unwrap();
         assert_eq!(
             TimeReference::LastWeekday(Weekday::Mon).resolve(base),
             expected
@@ -283,6 +283,18 @@ mod tests {
     }
 
     #[test]
+    fn test_resolve_last_weekday_future_in_week() {
+        // Tuesday, Feb 3, 2026
+        let base = NaiveDate::from_ymd_opt(2026, 2, 3).unwrap();
+        // "last friday" should return Friday, Jan 30, 2026 (previous occurrence)
+        let expected = NaiveDate::from_ymd_opt(2026, 1, 30).unwrap();
+        assert_eq!(
+            TimeReference::LastWeekday(Weekday::Fri).resolve(base),
+            expected
+        );
+    }
+
+    #[test]
     fn test_resolve_next_weekday() {
         // Friday, Jan 17, 2025
         let base = NaiveDate::from_ymd_opt(2025, 1, 17).unwrap();
@@ -290,6 +302,18 @@ mod tests {
         let expected = NaiveDate::from_ymd_opt(2025, 1, 20).unwrap();
         assert_eq!(
             TimeReference::NextWeekday(Weekday::Mon).resolve(base),
+            expected
+        );
+    }
+
+    #[test]
+    fn test_resolve_next_weekday_future_in_week() {
+        // Tuesday, Feb 3, 2026
+        let base = NaiveDate::from_ymd_opt(2026, 2, 3).unwrap();
+        // "next friday" should return Friday, Feb 6, 2026 (same week)
+        let expected = NaiveDate::from_ymd_opt(2026, 2, 6).unwrap();
+        assert_eq!(
+            TimeReference::NextWeekday(Weekday::Fri).resolve(base),
             expected
         );
     }

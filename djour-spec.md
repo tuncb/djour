@@ -81,8 +81,8 @@ Opens the appropriate note file for the given time reference. Creates the file i
 | `yesterday` | Previous day | `2025-01-16.md` |
 | `tomorrow` | Next day | `2025-01-18.md` |
 | `monday` ... `sunday` | Most recent occurrence (or today if matching) | `2025-01-13.md` |
-| `last monday` ... `last sunday` | Previous week's day | `2025-01-06.md` |
-| `next monday` ... `next sunday` | Next week's day | `2025-01-20.md` |
+| `last monday` ... `last sunday` | Previous occurrence (strictly before today) | `2025-01-06.md` |
+| `next monday` ... `next sunday` | Next occurrence (strictly after today) | `2025-01-20.md` |
 | `YYYY-MM-DD` | Specific date | `2025-01-15.md` |
 | `now` | Current time period (alias for `today`) | `2025-01-17.md` |
 
