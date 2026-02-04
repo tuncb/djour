@@ -4,7 +4,7 @@
 //! into markdown compilations.
 
 use super::{TagContext, TagQuery, TaggedContent};
-use chrono::NaiveDate;
+use chrono::{Datelike, Duration, NaiveDate};
 use std::collections::HashMap;
 
 /// Format for compiled output
@@ -14,6 +14,17 @@ pub enum CompilationFormat {
     Chronological,
     /// Grouped by source file
     Grouped,
+}
+
+/// How to display dates in compiled output
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompilationDateStyle {
+    /// Display a single date (e.g., 15-01-2025)
+    SingleDate,
+    /// Display a week range (start to end)
+    WeekRange,
+    /// Display a month range (start to end)
+    MonthRange,
 }
 
 /// Compiler for filtering and organizing tagged content
@@ -92,12 +103,15 @@ impl TagCompiler {
     /// * `content` - Tagged content to include
     /// * `query` - The query that was used (for the title)
     /// * `format` - Output format (chronological or grouped)
+    /// * `date_style` - How to display dates in headers
     /// * `include_context` - Whether to include parent section headings
     ///
     /// # Examples
     ///
     /// ```
-    /// use djour::domain::tags::{TagCompiler, TagQuery, TaggedContent, TagContext, CompilationFormat};
+    /// use djour::domain::tags::{
+    ///     CompilationDateStyle, CompilationFormat, TagCompiler, TagContext, TagQuery, TaggedContent,
+    /// };
     /// use std::path::PathBuf;
     /// use chrono::NaiveDate;
     ///
@@ -115,7 +129,13 @@ impl TagCompiler {
     /// ];
     ///
     /// let query = TagQuery::parse("work").unwrap();
-    /// let markdown = TagCompiler::to_markdown(content, &query, CompilationFormat::Chronological, false);
+    /// let markdown = TagCompiler::to_markdown(
+    ///     content,
+    ///     &query,
+    ///     CompilationFormat::Chronological,
+    ///     CompilationDateStyle::SingleDate,
+    ///     false,
+    /// );
     /// assert!(markdown.contains("# Compilation: #work"));
     /// assert!(markdown.contains("## 15-01-2025"));
     /// ```
@@ -123,6 +143,7 @@ impl TagCompiler {
         content: Vec<TaggedContent>,
         query: &TagQuery,
         format: CompilationFormat,
+        date_style: CompilationDateStyle,
         include_context: bool,
     ) -> String {
         let mut output = String::new();
@@ -137,10 +158,10 @@ impl TagCompiler {
 
         match format {
             CompilationFormat::Chronological => {
-                Self::markdown_chronological(content, include_context, &mut output);
+                Self::markdown_chronological(content, date_style, include_context, &mut output);
             }
             CompilationFormat::Grouped => {
-                Self::markdown_grouped(content, include_context, &mut output);
+                Self::markdown_grouped(content, date_style, include_context, &mut output);
             }
         }
 
@@ -150,6 +171,7 @@ impl TagCompiler {
     /// Generate chronological markdown output
     fn markdown_chronological(
         content: Vec<TaggedContent>,
+        date_style: CompilationDateStyle,
         include_context: bool,
         output: &mut String,
     ) {
@@ -160,7 +182,8 @@ impl TagCompiler {
             // Date header (if changed)
             if tc.date != current_date {
                 if let Some(date) = tc.date {
-                    output.push_str(&format!("\n## {}\n\n", date.format("%d-%m-%Y")));
+                    let header = Self::format_date_header(date, date_style);
+                    output.push_str(&format!("\n## {}\n\n", header));
                     current_date = tc.date;
                 } else if current_date.is_some() {
                     // Switch to undated section
@@ -186,11 +209,25 @@ impl TagCompiler {
     }
 
     /// Generate grouped markdown output
-    fn markdown_grouped(content: Vec<TaggedContent>, include_context: bool, output: &mut String) {
+    fn markdown_grouped(
+        content: Vec<TaggedContent>,
+        date_style: CompilationDateStyle,
+        include_context: bool,
+        output: &mut String,
+    ) {
         let groups = Self::group_by_file(content);
 
         for (filename, items) in groups {
-            output.push_str(&format!("\n## From: {}\n\n", filename));
+            if date_style != CompilationDateStyle::SingleDate {
+                if let Some(date) = items.iter().find_map(|tc| tc.date) {
+                    let header = Self::format_date_header(date, date_style);
+                    output.push_str(&format!("\n## From: {} ({})\n\n", filename, header));
+                } else {
+                    output.push_str(&format!("\n## From: {}\n\n", filename));
+                }
+            } else {
+                output.push_str(&format!("\n## From: {}\n\n", filename));
+            }
 
             for tc in items {
                 // Context heading (if available and requested)
@@ -208,6 +245,32 @@ impl TagCompiler {
                 output.push_str("\n\n");
             }
         }
+    }
+
+    fn format_date_header(date: NaiveDate, date_style: CompilationDateStyle) -> String {
+        match date_style {
+            CompilationDateStyle::SingleDate => date.format("%d-%m-%Y").to_string(),
+            CompilationDateStyle::WeekRange => {
+                let end = date + Duration::days(6);
+                format!("{} to {}", date.format("%d-%m-%Y"), end.format("%d-%m-%Y"))
+            }
+            CompilationDateStyle::MonthRange => {
+                let end = Self::end_of_month(date);
+                format!("{} to {}", date.format("%d-%m-%Y"), end.format("%d-%m-%Y"))
+            }
+        }
+    }
+
+    fn end_of_month(date: NaiveDate) -> NaiveDate {
+        let year = date.year();
+        let month = date.month();
+        let (next_year, next_month) = if month == 12 {
+            (year + 1, 1)
+        } else {
+            (year, month + 1)
+        };
+        let first_next = NaiveDate::from_ymd_opt(next_year, next_month, 1).expect("valid month");
+        first_next - Duration::days(1)
     }
 }
 
@@ -366,12 +429,61 @@ mod tests {
         )];
 
         let query = TagQuery::parse("work").unwrap();
-        let markdown =
-            TagCompiler::to_markdown(content, &query, CompilationFormat::Chronological, false);
+        let markdown = TagCompiler::to_markdown(
+            content,
+            &query,
+            CompilationFormat::Chronological,
+            CompilationDateStyle::SingleDate,
+            false,
+        );
 
         assert!(markdown.contains("# Compilation: #work"));
         assert!(markdown.contains("## 15-01-2025"));
         assert!(markdown.contains("Meeting notes"));
+    }
+
+    #[test]
+    fn test_to_markdown_week_range() {
+        let content = vec![create_test_content(
+            vec!["work"],
+            "Weekly notes",
+            "2025-W03-2025-01-13.md",
+            NaiveDate::from_ymd_opt(2025, 1, 13),
+        )];
+
+        let query = TagQuery::parse("work").unwrap();
+        let markdown = TagCompiler::to_markdown(
+            content,
+            &query,
+            CompilationFormat::Chronological,
+            CompilationDateStyle::WeekRange,
+            false,
+        );
+
+        assert!(markdown.contains("## 13-01-2025 to 19-01-2025"));
+        assert!(markdown.contains("Weekly notes"));
+    }
+
+    #[test]
+    fn test_to_markdown_month_range() {
+        let content = vec![create_test_content(
+            vec!["work"],
+            "Monthly notes",
+            "2025-02.md",
+            NaiveDate::from_ymd_opt(2025, 2, 1),
+        )];
+
+        let query = TagQuery::parse("work").unwrap();
+        let markdown = TagCompiler::to_markdown(
+            content,
+            &query,
+            CompilationFormat::Chronological,
+            CompilationDateStyle::MonthRange,
+            false,
+        );
+
+        assert!(markdown.contains("## 01-02-2025 to 28-02-2025"));
+        assert!(markdown.contains("Monthly notes"));
     }
 
     #[test]
@@ -384,7 +496,13 @@ mod tests {
         )];
 
         let query = TagQuery::parse("work").unwrap();
-        let markdown = TagCompiler::to_markdown(content, &query, CompilationFormat::Grouped, false);
+        let markdown = TagCompiler::to_markdown(
+            content,
+            &query,
+            CompilationFormat::Grouped,
+            CompilationDateStyle::SingleDate,
+            false,
+        );
 
         assert!(markdown.contains("# Compilation: #work"));
         assert!(markdown.contains("## From: 2025-01-15.md"));
@@ -396,8 +514,13 @@ mod tests {
         let content = vec![];
 
         let query = TagQuery::parse("work").unwrap();
-        let markdown =
-            TagCompiler::to_markdown(content, &query, CompilationFormat::Chronological, false);
+        let markdown = TagCompiler::to_markdown(
+            content,
+            &query,
+            CompilationFormat::Chronological,
+            CompilationDateStyle::SingleDate,
+            false,
+        );
 
         assert!(markdown.contains("# Compilation: #work"));
         assert!(markdown.contains("*No matching content found.*"));
@@ -417,8 +540,13 @@ mod tests {
         }];
 
         let query = TagQuery::parse("work").unwrap();
-        let markdown =
-            TagCompiler::to_markdown(content, &query, CompilationFormat::Chronological, true);
+        let markdown = TagCompiler::to_markdown(
+            content,
+            &query,
+            CompilationFormat::Chronological,
+            CompilationDateStyle::SingleDate,
+            true,
+        );
 
         assert!(markdown.contains("### Work Notes")); // Level 1 + 2 = ###
         assert!(markdown.contains("Meeting notes"));
@@ -442,8 +570,13 @@ mod tests {
         ];
 
         let query = TagQuery::parse("work").unwrap();
-        let markdown =
-            TagCompiler::to_markdown(content, &query, CompilationFormat::Chronological, false);
+        let markdown = TagCompiler::to_markdown(
+            content,
+            &query,
+            CompilationFormat::Chronological,
+            CompilationDateStyle::SingleDate,
+            false,
+        );
 
         assert!(markdown.contains("## 15-01-2025"));
         assert!(markdown.contains("## 16-01-2025"));

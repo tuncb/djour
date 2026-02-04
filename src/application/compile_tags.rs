@@ -2,7 +2,10 @@
 //!
 //! Orchestrates the full workflow of compiling tagged content from journal entries.
 
-use crate::domain::tags::{CompilationFormat, TagCompiler, TagParser, TagQuery, TaggedContent};
+use crate::domain::tags::{
+    CompilationDateStyle, CompilationFormat, TagCompiler, TagParser, TagQuery, TaggedContent,
+};
+use crate::domain::JournalMode;
 use crate::error::{DjourError, Result};
 use crate::infrastructure::repository::JournalRepository;
 use crate::infrastructure::FileSystemRepository;
@@ -101,8 +104,19 @@ impl CompileTagsService {
         }
 
         // 6. Generate markdown output
-        let markdown =
-            TagCompiler::to_markdown(filtered, &query, options.format, options.include_context);
+        let date_style = match config.get_mode() {
+            JournalMode::Weekly => CompilationDateStyle::WeekRange,
+            JournalMode::Monthly => CompilationDateStyle::MonthRange,
+            _ => CompilationDateStyle::SingleDate,
+        };
+
+        let markdown = TagCompiler::to_markdown(
+            filtered,
+            &query,
+            options.format,
+            date_style,
+            options.include_context,
+        );
 
         // 7. Determine output path
         let output_path = if let Some(path) = options.output {

@@ -205,6 +205,62 @@ fn test_compile_format_chronological() {
 }
 
 #[test]
+fn test_compile_weekly_date_range() {
+    let temp = TempDir::new().unwrap();
+
+    djour_cmd()
+        .arg("init")
+        .arg(temp.path())
+        .arg("--mode")
+        .arg("weekly")
+        .assert()
+        .success();
+
+    create_note(
+        &temp,
+        "2025-W03-2025-01-13.md",
+        "## Work #work\nWeekly note. #work",
+    );
+
+    djour_cmd()
+        .current_dir(temp.path())
+        .arg("compile")
+        .arg("work")
+        .assert()
+        .success();
+
+    let output = temp.path().join("compilations/work.md");
+    let content = fs::read_to_string(output).unwrap();
+    assert!(content.contains("## 13-01-2025 to 19-01-2025"));
+}
+
+#[test]
+fn test_compile_monthly_date_range() {
+    let temp = TempDir::new().unwrap();
+
+    djour_cmd()
+        .arg("init")
+        .arg(temp.path())
+        .arg("--mode")
+        .arg("monthly")
+        .assert()
+        .success();
+
+    create_note(&temp, "2025-02.md", "## Work #work\nMonthly note. #work");
+
+    djour_cmd()
+        .current_dir(temp.path())
+        .arg("compile")
+        .arg("work")
+        .assert()
+        .success();
+
+    let output = temp.path().join("compilations/work.md");
+    let content = fs::read_to_string(output).unwrap();
+    assert!(content.contains("## 01-02-2025 to 28-02-2025"));
+}
+
+#[test]
 fn test_compile_format_grouped() {
     let temp = TempDir::new().unwrap();
     init_journal(&temp);
