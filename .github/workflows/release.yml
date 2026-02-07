@@ -70,43 +70,46 @@ jobs:
       shell: bash
       run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
-    - name: Create staging directory
+    - name: Prepare archive metadata
       shell: bash
       run: |
-        STAGING="djour-${{ steps.get_version.outputs.VERSION }}-${{ matrix.target }}"
-        mkdir -p "$STAGING"
-        cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} "$STAGING/"
-        cp README.md LICENSE "$STAGING/"
-        echo "STAGING=$STAGING" >> $GITHUB_ENV
+        ARCHIVE_BASE="djour-${{ steps.get_version.outputs.VERSION }}-${{ matrix.target }}"
+        BINARY_PATH="target/${{ matrix.target }}/release/${{ matrix.artifact_name }}"
+        echo "ARCHIVE_BASE=$ARCHIVE_BASE" >> $GITHUB_ENV
+        echo "BINARY_PATH=$BINARY_PATH" >> $GITHUB_ENV
 
     - name: Create archive (Linux/macOS)
       if: matrix.archive_type == 'tar.gz'
-      run: tar czf "${{ env.STAGING }}.tar.gz" "${{ env.STAGING }}"
+      shell: bash
+      run: |
+        tar czf "${{ env.ARCHIVE_BASE }}.tar.gz" \
+          -C "$(dirname "${{ env.BINARY_PATH }}")" \
+          "$(basename "${{ env.BINARY_PATH }}")"
 
     - name: Create archive (Windows)
       if: matrix.archive_type == 'zip'
       shell: pwsh
-      run: Compress-Archive -Path "${{ env.STAGING }}" -DestinationPath "${{ env.STAGING }}.zip"
+      run: Compress-Archive -Path "${{ env.BINARY_PATH }}" -DestinationPath "${{ env.ARCHIVE_BASE }}.zip"
 
     - name: Generate checksum (Linux/macOS)
       if: matrix.archive_type == 'tar.gz'
       run: |
-        shasum -a 256 "${{ env.STAGING }}.tar.gz" > "${{ env.STAGING }}.tar.gz.sha256"
+        shasum -a 256 "${{ env.ARCHIVE_BASE }}.tar.gz" > "${{ env.ARCHIVE_BASE }}.tar.gz.sha256"
 
     - name: Generate checksum (Windows)
       if: matrix.archive_type == 'zip'
       shell: pwsh
       run: |
-        $hash = Get-FileHash "${{ env.STAGING }}.zip" -Algorithm SHA256
-        "$($hash.Hash.ToLower())  ${{ env.STAGING }}.zip" | Out-File -FilePath "${{ env.STAGING }}.zip.sha256" -Encoding ASCII
+        $hash = Get-FileHash "${{ env.ARCHIVE_BASE }}.zip" -Algorithm SHA256
+        "$($hash.Hash.ToLower())  ${{ env.ARCHIVE_BASE }}.zip" | Out-File -FilePath "${{ env.ARCHIVE_BASE }}.zip.sha256" -Encoding ASCII
 
     - name: Upload archive artifact
       uses: actions/upload-artifact@v4
       with:
         name: archive-${{ matrix.target }}
         path: |
-          ${{ env.STAGING }}.${{ matrix.archive_type }}
-          ${{ env.STAGING }}.${{ matrix.archive_type }}.sha256
+          ${{ env.ARCHIVE_BASE }}.${{ matrix.archive_type }}
+          ${{ env.ARCHIVE_BASE }}.${{ matrix.archive_type }}.sha256
 
   release:
     name: Create Release
