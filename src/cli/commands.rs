@@ -86,6 +86,10 @@ pub enum Commands {
         /// Include parent section headings for context
         #[arg(long)]
         include_context: bool,
+
+        /// Open compiled file in configured editor
+        #[arg(long)]
+        open: bool,
     },
 
     /// Change journal mode and migrate existing notes (daily <-> weekly)
@@ -141,5 +145,14 @@ mod tests {
     fn rejects_open_with_subcommand() {
         let result = Cli::try_parse_from(["djour", "list", "--open"]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn parses_compile_open_flag() {
+        let cli = Cli::try_parse_from(["djour", "compile", "work", "--open"]).unwrap();
+        match cli.command {
+            Some(super::Commands::Compile { open, .. }) => assert!(open),
+            _ => panic!("Expected compile command"),
+        }
     }
 }

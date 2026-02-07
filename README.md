@@ -198,7 +198,12 @@ djour compile work --format grouped
 
 # Include parent section context
 djour compile work --include-context
+
+# Compile and open output in your editor
+djour compile work --open
 ```
+
+By default, `djour compile` prints the generated compilation file path. When `--open` is provided, it opens the compiled file in your configured editor instead.
 
 **Boolean Tag Queries:**
 

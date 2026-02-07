@@ -8,7 +8,7 @@ use djour::cli::{format_note_list, Cli, Commands};
 use djour::domain::tags::CompilationFormat;
 use djour::domain::JournalMode;
 use djour::error::DjourError;
-use djour::infrastructure::{FileSystemRepository, JournalRepository};
+use djour::infrastructure::{EditorSession, FileSystemRepository, JournalRepository};
 use std::str::FromStr;
 
 fn main() {
@@ -104,6 +104,7 @@ fn run(cli: Cli) -> Result<(), DjourError> {
             to,
             format,
             include_context,
+            open,
         }) => {
             // Discover repository
             let repo = FileSystemRepository::discover()?;
@@ -148,10 +149,20 @@ fn run(cli: Cli) -> Result<(), DjourError> {
             };
 
             // Execute compilation
-            let service = CompileTagsService::new(repo);
+            let service = CompileTagsService::new(repo.clone());
             let output_path = service.execute(options)?;
 
-            println!("Compiled tags to: {}", output_path.to_string_lossy());
+            if open {
+                let config = repo.load_config()?;
+                let editor = EditorSession::new(config.get_editor());
+                editor.open(&output_path)?;
+            } else {
+                let printable = output_path
+                    .strip_prefix(repo.root())
+                    .unwrap_or(&output_path)
+                    .to_string_lossy();
+                println!("{}", printable);
+            }
 
             Ok(())
         }

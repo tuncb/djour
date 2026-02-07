@@ -20,6 +20,14 @@ fn create_note(temp: &TempDir, filename: &str, content: &str) {
     fs::write(note_path, content).unwrap();
 }
 
+fn editor_command_for_test() -> &'static str {
+    if cfg!(windows) {
+        "cmd /c exit 0"
+    } else {
+        "sh -c true"
+    }
+}
+
 #[test]
 fn test_compile_single_tag() {
     let temp = TempDir::new().unwrap();
@@ -41,7 +49,7 @@ Meeting at 10am with team. #work",
         .arg("work")
         .assert()
         .success()
-        .stdout(predicate::str::contains("Compiled tags to:"));
+        .stdout(predicate::str::contains("work.md"));
 
     // Verify output file created
     let output = temp.path().join("compilations/work.md");
@@ -52,6 +60,33 @@ Meeting at 10am with team. #work",
     assert!(content.contains("# Compilation: #work"));
     assert!(content.contains("## 15-01-2025"));
     assert!(content.contains("Meeting at 10am with team"));
+}
+
+#[test]
+fn test_compile_with_open_flag_opens_file_without_stdout() {
+    let temp = TempDir::new().unwrap();
+    init_journal(&temp);
+
+    create_note(
+        &temp,
+        "2025-01-15.md",
+        "## Work Notes #work
+
+Meeting at 10am with team. #work",
+    );
+
+    djour_cmd()
+        .current_dir(temp.path())
+        .env("EDITOR", editor_command_for_test())
+        .arg("compile")
+        .arg("work")
+        .arg("--open")
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty());
+
+    let output = temp.path().join("compilations/work.md");
+    assert!(output.exists());
 }
 
 #[test]

@@ -6,7 +6,7 @@ stdout_contains = ["2025-W04-2025-01-20.md", "2025-W03-2025-01-13.md"]
 [[command]]
 args = ["compile", "work"]
 expect_exit = 0
-stdout_contains = ["Compiled tags to:"]
+stdout_contains = ["work.md"]
 
 [[command]]
 args = ["mode", "daily", "--dry-run", "--archive-dir", ".djour/archive/fixed"]

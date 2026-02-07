@@ -7,9 +7,9 @@ stdout_not_contains = ["readme.txt"]
 [[command]]
 args = ["compile", "work"]
 expect_exit = 0
-stdout_contains = ["Compiled tags to:"]
+stdout_contains = ["work.md"]
 
 [[command]]
 args = ["compile", "work AND focus"]
 expect_exit = 0
-stdout_contains = ["Compiled tags to:"]
+stdout_contains = ["work-and-focus.md"]
