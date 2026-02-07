@@ -1,0 +1,15 @@
+[[command]]
+args = ["list"]
+expect_exit = 0
+stdout_contains = ["20-01-2025", "14-01-2025", "13-01-2025"]
+stdout_not_contains = ["readme.txt"]
+
+[[command]]
+args = ["compile", "work"]
+expect_exit = 0
+stdout_contains = ["Compiled tags to:"]
+
+[[command]]
+args = ["compile", "work AND focus"]
+expect_exit = 0
+stdout_contains = ["Compiled tags to:"]

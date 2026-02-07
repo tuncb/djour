@@ -1,0 +1,19 @@
+[[command]]
+args = ["list"]
+expect_exit = 0
+stdout_contains = ["2025-W04-2025-01-20.md", "2025-W03-2025-01-13.md"]
+
+[[command]]
+args = ["compile", "work"]
+expect_exit = 0
+stdout_contains = ["Compiled tags to:"]
+
+[[command]]
+args = ["mode", "daily", "--dry-run", "--archive-dir", ".djour/archive/fixed"]
+expect_exit = 0
+stdout_contains = [
+  "Mode migration plan: weekly -> daily",
+  "Archive dir: .djour/archive/fixed",
+  "Weekly files to archive: 2",
+  "Daily files to create: 2",
+]

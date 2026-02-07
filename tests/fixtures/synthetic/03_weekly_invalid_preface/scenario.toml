@@ -1,0 +1,4 @@
+[[command]]
+args = ["mode", "daily", "--yes", "--archive-dir", ".djour/archive/fixed"]
+expect_exit = 1
+stderr_contains = ["between the header and Monday"]

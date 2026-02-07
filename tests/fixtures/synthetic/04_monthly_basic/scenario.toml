@@ -1,0 +1,9 @@
+[[command]]
+args = ["list"]
+expect_exit = 0
+stdout_contains = ["2025-01.md", "2024-12.md"]
+
+[[command]]
+args = ["compile", "work"]
+expect_exit = 0
+stdout_contains = ["Compiled tags to:"]
