@@ -184,10 +184,11 @@ fn run(cli: Cli) -> Result<(), DjourError> {
         None => {
             // Check if time_ref provided (open command)
             if let Some(time_ref) = cli.time_ref {
-                // Open note
+                // Resolve/create note and print filename
                 let repo = FileSystemRepository::discover()?;
                 let service = OpenNoteService::new(repo);
-                service.execute(&time_ref)?;
+                let filename = service.execute(&time_ref, cli.open)?;
+                println!("{}", filename);
                 Ok(())
             } else {
                 // No command and no time_ref, show help

@@ -16,8 +16,9 @@ impl OpenNoteService {
         OpenNoteService { repository }
     }
 
-    /// Execute the open note workflow
-    pub fn execute(&self, time_ref_str: &str) -> Result<()> {
+    /// Resolve time reference to note filename, creating the note if needed.
+    /// Opens the file in editor only when `open_in_editor` is true.
+    pub fn execute(&self, time_ref_str: &str, open_in_editor: bool) -> Result<String> {
         // 1. Load config to get mode and editor
         let config = self.repository.load_config()?;
 
@@ -54,14 +55,16 @@ impl OpenNoteService {
             }
         }
 
-        // 7. Open in editor
-        let editor_cmd = config.get_editor();
-        let editor = EditorSession::new(editor_cmd);
+        // 7. Open in editor when requested
+        if open_in_editor {
+            let editor_cmd = config.get_editor();
+            let editor = EditorSession::new(editor_cmd);
 
-        let file_path = self.repository.root().join(&filename);
-        editor.open(&file_path)?;
+            let file_path = self.repository.root().join(&filename);
+            editor.open(&file_path)?;
+        }
 
-        Ok(())
+        Ok(filename)
     }
 }
 
