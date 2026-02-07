@@ -330,7 +330,38 @@ impl FileSystemRepository {
 mod tests {
     use super::*;
     use crate::domain::JournalMode;
+    use std::ffi::OsString;
+    use std::sync::{Mutex, OnceLock};
     use tempfile::TempDir;
+
+    fn env_test_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    struct EnvVarRestore {
+        key: &'static str,
+        previous: Option<OsString>,
+    }
+
+    impl EnvVarRestore {
+        fn capture(key: &'static str) -> Self {
+            Self {
+                key,
+                previous: std::env::var_os(key),
+            }
+        }
+    }
+
+    impl Drop for EnvVarRestore {
+        fn drop(&mut self) {
+            if let Some(value) = &self.previous {
+                std::env::set_var(self.key, value);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
 
     #[test]
     fn test_new_repository() {
@@ -713,6 +744,9 @@ mod tests {
 
     #[test]
     fn test_discover_with_djour_root_env() {
+        let _env_lock = env_test_lock().lock().unwrap();
+        let _restore = EnvVarRestore::capture("DJOUR_ROOT");
+
         let temp = TempDir::new().unwrap();
         fs::create_dir(temp.path().join(".djour")).unwrap();
 
@@ -721,12 +755,13 @@ mod tests {
 
         let repo = FileSystemRepository::discover().unwrap();
         assert_eq!(repo.root, temp.path());
-
-        std::env::remove_var("DJOUR_ROOT");
     }
 
     #[test]
     fn test_discover_djour_root_not_initialized() {
+        let _env_lock = env_test_lock().lock().unwrap();
+        let _restore = EnvVarRestore::capture("DJOUR_ROOT");
+
         let temp = TempDir::new().unwrap();
         // No .djour directory
 
@@ -741,12 +776,13 @@ mod tests {
             }
             _ => panic!("Expected Config error"),
         }
-
-        std::env::remove_var("DJOUR_ROOT");
     }
 
     #[test]
     fn test_discover_without_djour_root_env() {
+        let _env_lock = env_test_lock().lock().unwrap();
+        let _restore = EnvVarRestore::capture("DJOUR_ROOT");
+
         // Ensure DJOUR_ROOT is not set
         std::env::remove_var("DJOUR_ROOT");
 

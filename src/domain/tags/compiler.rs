@@ -165,6 +165,10 @@ impl TagCompiler {
             }
         }
 
+        if output.ends_with("\n\n") {
+            output.pop();
+        }
+
         output
     }
 
@@ -582,5 +586,27 @@ mod tests {
         assert!(markdown.contains("## 16-01-2025"));
         assert!(markdown.contains("First day"));
         assert!(markdown.contains("Second day"));
+    }
+
+    #[test]
+    fn test_to_markdown_no_trailing_blank_line() {
+        let content = vec![create_test_content(
+            vec!["work"],
+            "Single line item",
+            "2025-01-15.md",
+            NaiveDate::from_ymd_opt(2025, 1, 15),
+        )];
+
+        let query = TagQuery::parse("work").unwrap();
+        let markdown = TagCompiler::to_markdown(
+            content,
+            &query,
+            CompilationFormat::Chronological,
+            CompilationDateStyle::SingleDate,
+            false,
+        );
+
+        assert!(!markdown.ends_with("\n\n"));
+        assert!(markdown.ends_with('\n'));
     }
 }

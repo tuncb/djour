@@ -98,7 +98,38 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsString;
+    use std::sync::{Mutex, OnceLock};
     use tempfile::TempDir;
+
+    fn env_test_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    struct EnvVarRestore {
+        key: &'static str,
+        previous: Option<OsString>,
+    }
+
+    impl EnvVarRestore {
+        fn capture(key: &'static str) -> Self {
+            Self {
+                key,
+                previous: std::env::var_os(key),
+            }
+        }
+    }
+
+    impl Drop for EnvVarRestore {
+        fn drop(&mut self) {
+            if let Some(value) = &self.previous {
+                std::env::set_var(self.key, value);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
 
     #[test]
     fn test_new_config() {
@@ -182,6 +213,9 @@ mod tests {
 
     #[test]
     fn test_get_mode_with_env_override() {
+        let _env_lock = env_test_lock().lock().unwrap();
+        let _restore = EnvVarRestore::capture("DJOUR_MODE");
+
         // Clean up first to avoid interference from other tests
         std::env::remove_var("DJOUR_MODE");
 
@@ -201,6 +235,9 @@ mod tests {
 
     #[test]
     fn test_get_mode_invalid_env_falls_back() {
+        let _env_lock = env_test_lock().lock().unwrap();
+        let _restore = EnvVarRestore::capture("DJOUR_MODE");
+
         // Clean up first
         std::env::remove_var("DJOUR_MODE");
 
@@ -215,6 +252,9 @@ mod tests {
 
     #[test]
     fn test_get_mode_without_env() {
+        let _env_lock = env_test_lock().lock().unwrap();
+        let _restore = EnvVarRestore::capture("DJOUR_MODE");
+
         // Ensure DJOUR_MODE is not set
         std::env::remove_var("DJOUR_MODE");
 
