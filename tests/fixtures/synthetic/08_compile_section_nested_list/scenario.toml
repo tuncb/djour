@@ -1,0 +1,4 @@
+[[command]]
+args = ["compile", "section"]
+expect_exit = 0
+stdout_contains = ["section.md"]

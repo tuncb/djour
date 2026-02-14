@@ -214,6 +214,149 @@ fn link_or_image_tail(destination: &str, title: &str) -> String {
     }
 }
 
+fn format_list_item_markdown(item_text: &str, depth: usize) -> String {
+    let trimmed = item_text.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    let base_indent = "  ".repeat(depth.saturating_sub(1));
+    let continuation_indent = format!("{}  ", base_indent);
+
+    let mut lines = trimmed.lines();
+    let first_line = lines.next().unwrap_or_default();
+    let mut rendered = if first_line.is_empty() {
+        format!("{}-", base_indent)
+    } else {
+        format!("{}- {}", base_indent, first_line)
+    };
+
+    for line in lines {
+        rendered.push('\n');
+        if line.is_empty() {
+            continue;
+        }
+        rendered.push_str(&continuation_indent);
+        rendered.push_str(line);
+    }
+
+    rendered
+}
+
+fn trim_section_body(raw: &str) -> &str {
+    raw.trim_matches(|c| c == '\r' || c == '\n')
+}
+
+fn parse_atx_heading_level(line: &str) -> Option<usize> {
+    let line = line.trim_end_matches(['\r', '\n']);
+    let trimmed = line.trim_start_matches(' ');
+    let leading_spaces = line.len().saturating_sub(trimmed.len());
+    if leading_spaces > 3 {
+        return None;
+    }
+
+    let level = trimmed.chars().take_while(|c| *c == '#').count();
+    if level == 0 || level > 6 {
+        return None;
+    }
+
+    let rest = &trimmed[level..];
+    if !rest.starts_with(' ') && !rest.starts_with('\t') {
+        return None;
+    }
+
+    Some(level)
+}
+
+fn parse_fence_marker(line: &str) -> Option<(char, usize)> {
+    let line = line.trim_end_matches(['\r', '\n']);
+    let trimmed = line.trim_start_matches(' ');
+    let leading_spaces = line.len().saturating_sub(trimmed.len());
+    if leading_spaces > 3 {
+        return None;
+    }
+
+    let mut chars = trimmed.chars();
+    let fence_char = chars.next()?;
+    if fence_char != '`' && fence_char != '~' {
+        return None;
+    }
+
+    let count = trimmed.chars().take_while(|c| *c == fence_char).count();
+    if count < 3 {
+        return None;
+    }
+
+    Some((fence_char, count))
+}
+
+#[derive(Debug, Clone)]
+struct HeadingSpan {
+    level: usize,
+    line_start: usize,
+    line_end: usize,
+}
+
+fn collect_heading_spans(content: &str) -> Vec<HeadingSpan> {
+    let mut spans = Vec::new();
+    let mut offset = 0usize;
+    let mut active_fence: Option<(char, usize)> = None;
+
+    for line in content.split_inclusive('\n') {
+        if let Some((fence_char, min_len)) = active_fence {
+            if let Some((marker_char, marker_len)) = parse_fence_marker(line) {
+                if marker_char == fence_char && marker_len >= min_len {
+                    active_fence = None;
+                }
+            }
+
+            offset += line.len();
+            continue;
+        }
+
+        if let Some((fence_char, marker_len)) = parse_fence_marker(line) {
+            active_fence = Some((fence_char, marker_len));
+            offset += line.len();
+            continue;
+        }
+
+        if let Some(level) = parse_atx_heading_level(line) {
+            let line_start = offset;
+            let line_end = offset + line.len();
+            spans.push(HeadingSpan {
+                level,
+                line_start,
+                line_end,
+            });
+        }
+
+        offset += line.len();
+    }
+
+    spans
+}
+
+fn extract_section_bodies_in_order(content: &str) -> Vec<String> {
+    let headings = collect_heading_spans(content);
+    let mut bodies = Vec::with_capacity(headings.len());
+
+    for (idx, heading) in headings.iter().enumerate() {
+        let start = heading.line_end.min(content.len());
+        let mut end = content.len();
+
+        for next in headings.iter().skip(idx + 1) {
+            if next.level <= heading.level {
+                end = next.line_start.min(content.len());
+                break;
+            }
+        }
+
+        bodies.push(trim_section_body(&content[start..end]).to_string());
+    }
+
+    bodies
+}
+
 #[derive(Debug, Clone)]
 enum InlineConstruct {
     Link { destination: String, title: String },
@@ -324,6 +467,11 @@ impl SectionStack {
             level: s.level,
         })
     }
+
+    /// Whether we are currently inside any section that has explicit heading tags.
+    fn in_explicit_tagged_section(&self) -> bool {
+        self.stack.iter().any(|section| !section.tags.is_empty())
+    }
 }
 
 pub struct TagParser;
@@ -346,11 +494,13 @@ impl TagParser {
         date: Option<NaiveDate>,
         output_file: Option<&Path>,
     ) -> Vec<TaggedContent> {
+        let section_bodies = extract_section_bodies_in_order(content);
         let mut results = Vec::new();
         let mut section_stack = SectionStack::new();
         let mut list_tag_stack: Vec<Vec<String>> = Vec::new();
         let mut item_stack: Vec<String> = Vec::new();
         let mut item_tag_stack: Vec<Vec<String>> = Vec::new();
+        let mut item_children_stack: Vec<Vec<TaggedContent>> = Vec::new();
         let mut pending_list_tags: Option<Vec<String>> = None;
 
         let parser = MdParser::new(content);
@@ -364,6 +514,7 @@ impl TagParser {
         let mut code_block_text = String::new();
         let mut pending_code_block_target: Option<usize> = None;
         let mut inline_stack: Vec<InlineConstruct> = Vec::new();
+        let mut heading_index = 0usize;
 
         let extend_unique = |dest: &mut Vec<String>, tags: Vec<String>| {
             for tag in tags {
@@ -403,32 +554,60 @@ impl TagParser {
                     pending_code_block_target = None;
                     item_stack.push(String::new());
                     item_tag_stack.push(Vec::new());
+                    item_children_stack.push(Vec::new());
                 }
 
                 Event::End(TagEnd::Item) => {
+                    let depth = item_stack.len();
                     let item_text = item_stack.pop().unwrap_or_default();
                     let mut item_tags = item_tag_stack.pop().unwrap_or_default();
+                    let child_items = item_children_stack.pop().unwrap_or_default();
                     let text_tags = extract_tags(&item_text);
                     extend_unique(&mut item_tags, text_tags);
 
-                    let mut all_tags = section_stack.current_tags();
-                    if let Some(list_tags) = list_tag_stack.last() {
-                        extend_unique(&mut all_tags, list_tags.clone());
-                    }
-                    extend_unique(&mut all_tags, item_tags);
+                    let section_tags = section_stack.current_tags();
+                    let list_tags = list_tag_stack.last().cloned().unwrap_or_default();
+                    let mut local_tags = list_tags.clone();
+                    extend_unique(&mut local_tags, item_tags.clone());
+
+                    let inside_explicit_section = section_stack.in_explicit_tagged_section();
+                    let mut all_tags = section_tags;
+                    extend_unique(&mut all_tags, local_tags.clone());
+
+                    let should_emit = if inside_explicit_section {
+                        !local_tags.is_empty()
+                    } else {
+                        !all_tags.is_empty()
+                    };
 
                     let content_clean = strip_tags(&item_text);
                     let content_raw = item_text.trim().to_string();
-                    if !content_clean.trim().is_empty() && !all_tags.is_empty() {
-                        results.push(TaggedContent::new(
+                    let current_item = if !content_clean.trim().is_empty() && should_emit {
+                        Some(TaggedContent::new(
                             all_tags,
-                            content_raw,
+                            format_list_item_markdown(&content_raw, depth),
                             source_file.to_path_buf(),
                             date,
                             section_stack
                                 .current_context()
                                 .unwrap_or(TagContext::Paragraph),
-                        ));
+                        ))
+                    } else {
+                        None
+                    };
+
+                    if depth > 1 {
+                        if let Some(parent_children) = item_children_stack.last_mut() {
+                            if let Some(item) = current_item {
+                                parent_children.push(item);
+                            }
+                            parent_children.extend(child_items);
+                        }
+                    } else {
+                        if let Some(item) = current_item {
+                            results.push(item);
+                        }
+                        results.extend(child_items);
                     }
                 }
 
@@ -446,7 +625,11 @@ impl TagParser {
                     // Extract tags from heading
                     let heading_tags = extract_tags(&current_heading_text);
                     let heading_clean = strip_tags(&current_heading_text);
-                    let heading_raw = current_heading_text.trim().to_string();
+                    let section_body = section_bodies
+                        .get(heading_index)
+                        .map(|s| s.as_str())
+                        .unwrap_or_default();
+                    heading_index += 1;
 
                     // Update section stack
                     section_stack.push_heading(
@@ -455,11 +638,11 @@ impl TagParser {
                         heading_tags.clone(),
                     );
 
-                    // If heading has tags, create tagged content for the heading itself (if any text)
-                    if !heading_tags.is_empty() && !heading_clean.trim().is_empty() {
+                    // For tagged headings, compile the full section body verbatim.
+                    if !heading_tags.is_empty() && !section_body.trim().is_empty() {
                         results.push(TaggedContent::new(
                             section_stack.current_tags(),
-                            heading_raw,
+                            section_body.to_string(),
                             source_file.to_path_buf(),
                             date,
                             TagContext::Section {
@@ -489,19 +672,36 @@ impl TagParser {
 
                     let content_clean = strip_tags(&current_paragraph);
                     let content_raw = current_paragraph.trim().to_string();
+                    let list_tags = list_tag_stack.last().cloned().unwrap_or_default();
+                    let mut local_tags = list_tags.clone();
+                    extend_unique(&mut local_tags, para_tags.clone());
+                    let inside_explicit_section = section_stack.in_explicit_tagged_section();
 
-                    if content_clean.trim().is_empty() && !para_tags.is_empty() {
+                    if !item_stack.is_empty() {
+                        if !content_clean.trim().is_empty() {
+                            if let Some(item_text) = item_stack.last_mut() {
+                                if !item_text.trim().is_empty() {
+                                    item_text.push_str("\n\n");
+                                }
+                                item_text.push_str(&content_raw);
+                            }
+                        }
+                        pending_list_tags = None;
+                    } else if content_clean.trim().is_empty() && !para_tags.is_empty() {
                         // Tag-only paragraph can act as a list tag context for a following list
                         pending_list_tags = Some(para_tags);
                     } else {
                         // Paragraph has tags or inherits tags from section or list
                         let mut all_tags = section_stack.current_tags();
-                        if let Some(list_tags) = list_tag_stack.last() {
-                            extend_unique(&mut all_tags, list_tags.clone());
-                        }
-                        extend_unique(&mut all_tags, para_tags);
+                        extend_unique(&mut all_tags, local_tags.clone());
 
-                        if !content_clean.trim().is_empty() && !all_tags.is_empty() {
+                        let should_emit = if inside_explicit_section {
+                            !local_tags.is_empty()
+                        } else {
+                            !all_tags.is_empty()
+                        };
+
+                        if !content_clean.trim().is_empty() && should_emit {
                             results.push(TaggedContent::new(
                                 all_tags,
                                 content_raw,
@@ -632,15 +832,23 @@ impl TagParser {
                         );
                     } else {
                         let html_tags = extract_tags(&rewritten_html);
+                        let list_tags = list_tag_stack.last().cloned().unwrap_or_default();
+                        let mut local_tags = list_tags.clone();
+                        extend_unique(&mut local_tags, html_tags.clone());
+                        let inside_explicit_section = section_stack.in_explicit_tagged_section();
+
                         let mut all_tags = section_stack.current_tags();
-                        if let Some(list_tags) = list_tag_stack.last() {
-                            extend_unique(&mut all_tags, list_tags.clone());
-                        }
-                        extend_unique(&mut all_tags, html_tags);
+                        extend_unique(&mut all_tags, local_tags.clone());
 
                         let content_clean = strip_tags(&rewritten_html);
                         let content_raw = rewritten_html.trim().to_string();
-                        if !content_clean.trim().is_empty() && !all_tags.is_empty() {
+                        let should_emit = if inside_explicit_section {
+                            !local_tags.is_empty()
+                        } else {
+                            !all_tags.is_empty()
+                        };
+
+                        if !content_clean.trim().is_empty() && should_emit {
                             results.push(TaggedContent::new(
                                 all_tags,
                                 content_raw,
@@ -689,12 +897,20 @@ impl TagParser {
                         }
                         results[idx].content.push_str(&fenced);
                     } else {
-                        let mut all_tags = section_stack.current_tags();
-                        if let Some(list_tags) = list_tag_stack.last() {
-                            extend_unique(&mut all_tags, list_tags.clone());
-                        }
+                        let list_tags = list_tag_stack.last().cloned().unwrap_or_default();
+                        let local_tags = list_tags.clone();
+                        let inside_explicit_section = section_stack.in_explicit_tagged_section();
 
-                        if !all_tags.is_empty() {
+                        let mut all_tags = section_stack.current_tags();
+                        extend_unique(&mut all_tags, local_tags.clone());
+
+                        let should_emit = if inside_explicit_section {
+                            !local_tags.is_empty()
+                        } else {
+                            !all_tags.is_empty()
+                        };
+
+                        if should_emit {
                             results.push(TaggedContent::new(
                                 all_tags,
                                 fenced,
@@ -818,13 +1034,11 @@ Action items assigned.
             })
             .unwrap();
         assert_eq!(heading.tags, vec!["work", "urgent"]);
-        assert_eq!(heading.content, "Meeting Notes #work #urgent");
-
-        let paragraph = results
-            .iter()
-            .find(|r| r.content.contains("Discussed project timeline."))
-            .unwrap();
-        assert_eq!(paragraph.tags, vec!["work", "urgent"]);
+        assert_eq!(
+            heading.content,
+            "Discussed project timeline.\nAction items assigned."
+        );
+        assert_eq!(results.len(), 1);
     }
 
     #[test]
@@ -935,7 +1149,7 @@ This paragraph should inherit work tag. #meeting
         // Find the paragraph
         let paragraph = results
             .iter()
-            .find(|r| r.content.contains("This paragraph"))
+            .find(|r| r.tags.contains(&"meeting".to_string()))
             .unwrap();
 
         // Should have both inherited #work and paragraph #meeting
@@ -978,9 +1192,8 @@ Regular paragraph with no tags.
 
         let results = TagParser::extract_from_markdown(markdown, Path::new("test.md"), None);
 
-        // Heading itself should be captured
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].content, "Heading #tag");
+        // Tagged headings with no section body should not create empty entries.
+        assert_eq!(results.len(), 0);
     }
 
     #[test]
@@ -1068,10 +1281,11 @@ See [Website](https://example.com/docs). #work
     #[test]
     fn test_date_preserved() {
         let date = Some(NaiveDate::from_ymd_opt(2025, 1, 17).unwrap());
-        let markdown = "## Notes #work";
+        let markdown = "## Notes #work\n\nBody content.";
 
         let results = TagParser::extract_from_markdown(markdown, Path::new("2025-01-17.md"), date);
 
+        assert_eq!(results.len(), 1);
         assert_eq!(results[0].date, date);
     }
 
@@ -1153,6 +1367,30 @@ See [Website](https://example.com/docs). #work
         assert!(combined.contains("item 1"));
         assert!(combined.contains("item 2"));
         assert!(combined.contains("item 3"));
+    }
+
+    #[test]
+    fn test_section_tag_preserves_nested_list_markdown_and_order() {
+        let markdown = r#"
+### #section
+
+- parent
+  - child
+- sibling
+"#;
+
+        let results = TagParser::extract_from_markdown(markdown, Path::new("test.md"), None);
+        let section = String::from("section");
+        let list_items: Vec<String> = results
+            .iter()
+            .filter(|r| r.tags.contains(&section))
+            .map(|r| r.content.clone())
+            .collect();
+
+        assert_eq!(
+            list_items,
+            vec!["- parent\n  - child\n- sibling".to_string()]
+        );
     }
 
     #[test]

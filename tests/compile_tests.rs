@@ -625,6 +625,78 @@ fn test_compile_list_item_with_fenced_code_block() {
 }
 
 #[test]
+fn test_compile_section_tag_preserves_nested_list_formatting() {
+    let temp = TempDir::new().unwrap();
+    init_journal(&temp);
+
+    create_note(
+        &temp,
+        "2025-01-15.md",
+        r#"### #section
+
+- parent
+  - child
+- sibling
+"#,
+    );
+
+    djour_cmd()
+        .current_dir(temp.path())
+        .arg("compile")
+        .arg("section")
+        .assert()
+        .success();
+
+    let output = temp.path().join(".compilations/section.md");
+    let content = fs::read_to_string(output).unwrap();
+
+    let parent_idx = content.find("- parent").expect("parent item missing");
+    let child_idx = content.find("  - child").expect("child item missing");
+    let sibling_idx = content.find("- sibling").expect("sibling item missing");
+
+    assert!(parent_idx < child_idx);
+    assert!(child_idx < sibling_idx);
+}
+
+#[test]
+fn test_compile_section_tag_preserves_verbatim_markdown_formatting() {
+    let temp = TempDir::new().unwrap();
+    init_journal(&temp);
+
+    create_note(
+        &temp,
+        "2025-01-15.md",
+        r#"### #section
+
+Intro with **bold** and `code`.
+
+> quoted line
+
+1. first
+2. second
+
+- bullet
+  - nested
+"#,
+    );
+
+    djour_cmd()
+        .current_dir(temp.path())
+        .arg("compile")
+        .arg("section")
+        .assert()
+        .success();
+
+    let output = temp.path().join(".compilations/section.md");
+    let content = fs::read_to_string(output).unwrap();
+
+    assert!(content.contains("Intro with **bold** and `code`."));
+    assert!(content.contains("> quoted line"));
+    assert!(content.contains("1. first\n2. second"));
+    assert!(content.contains("- bullet\n  - nested"));
+}
+
+#[test]
 fn test_compile_tag_inheritance() {
     let temp = TempDir::new().unwrap();
     init_journal(&temp);
@@ -654,4 +726,37 @@ This inherits the work tag from parent section. #note",
     // The paragraph has #note tag, but it should also inherit #work from the parent section
     // So compiling "work" should include this paragraph
     assert!(content.contains("This inherits the work tag from parent section"));
+    assert_eq!(
+        content
+            .matches("This inherits the work tag from parent section. #note")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn test_compile_section_and_paragraph_tag_boolean_query() {
+    let temp = TempDir::new().unwrap();
+    init_journal(&temp);
+
+    create_note(
+        &temp,
+        "2025-01-15.md",
+        "## Work Section #work
+
+### Subsection #subsection
+
+This inherits the work tag from parent section. #note",
+    );
+
+    djour_cmd()
+        .current_dir(temp.path())
+        .arg("compile")
+        .arg("work AND note")
+        .assert()
+        .success();
+
+    let output = temp.path().join(".compilations/work-and-note.md");
+    let content = fs::read_to_string(output).unwrap();
+    assert!(content.contains("This inherits the work tag from parent section. #note"));
 }

@@ -54,10 +54,45 @@ impl TagCompiler {
     /// assert_eq!(filtered.len(), 1);
     /// ```
     pub fn filter(content: Vec<TaggedContent>, query: &TagQuery) -> Vec<TaggedContent> {
-        content
+        let matched: Vec<TaggedContent> = content
             .into_iter()
             .filter(|tc| query.matches(&tc.tags))
-            .collect()
+            .collect();
+
+        Self::dedupe_contained_in_section(matched)
+    }
+
+    fn dedupe_contained_in_section(content: Vec<TaggedContent>) -> Vec<TaggedContent> {
+        let mut deduped: Vec<TaggedContent> = Vec::new();
+
+        'candidate_loop: for candidate in content {
+            for container in &deduped {
+                if Self::is_contained_in_section(&candidate, container) {
+                    continue 'candidate_loop;
+                }
+            }
+            deduped.push(candidate);
+        }
+
+        deduped
+    }
+
+    fn is_contained_in_section(candidate: &TaggedContent, container: &TaggedContent) -> bool {
+        if !matches!(container.context, TagContext::Section { .. }) {
+            return false;
+        }
+
+        if candidate.source_file != container.source_file {
+            return false;
+        }
+
+        let candidate_content = candidate.content.as_str();
+        if candidate_content.trim().is_empty() {
+            return false;
+        }
+
+        container.content.len() > candidate_content.len()
+            && container.content.contains(candidate_content)
     }
 
     /// Sort content chronologically (by date, then by source file)
@@ -355,6 +390,64 @@ mod tests {
 
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].content, "Coding");
+    }
+
+    #[test]
+    fn test_filter_dedupes_content_contained_by_section() {
+        let content = vec![
+            TaggedContent {
+                tags: vec!["work".to_string()],
+                content: "Line one.\nLine two.".to_string(),
+                source_file: PathBuf::from("a.md"),
+                date: None,
+                context: TagContext::Section {
+                    heading: "Work".to_string(),
+                    level: 2,
+                },
+            },
+            TaggedContent {
+                tags: vec!["work".to_string()],
+                content: "Line one.".to_string(),
+                source_file: PathBuf::from("a.md"),
+                date: None,
+                context: TagContext::Paragraph,
+            },
+        ];
+
+        let query = TagQuery::parse("work").unwrap();
+        let filtered = TagCompiler::filter(content, &query);
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].content, "Line one.\nLine two.");
+    }
+
+    #[test]
+    fn test_filter_keeps_specific_match_when_section_does_not_match() {
+        let content = vec![
+            TaggedContent {
+                tags: vec!["work".to_string()],
+                content: "Line one.\nLine two.".to_string(),
+                source_file: PathBuf::from("a.md"),
+                date: None,
+                context: TagContext::Section {
+                    heading: "Work".to_string(),
+                    level: 2,
+                },
+            },
+            TaggedContent {
+                tags: vec!["work".to_string(), "note".to_string()],
+                content: "Line one.".to_string(),
+                source_file: PathBuf::from("a.md"),
+                date: None,
+                context: TagContext::Paragraph,
+            },
+        ];
+
+        let query = TagQuery::parse("work AND note").unwrap();
+        let filtered = TagCompiler::filter(content, &query);
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].content, "Line one.");
     }
 
     #[test]
