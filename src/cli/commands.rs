@@ -67,7 +67,7 @@ pub enum Commands {
         /// Tag query (e.g., "work", "work AND urgent", "work OR personal")
         query: String,
 
-        /// Output file path (default: compilations/<tag>.md)
+        /// Output file path (default: .compilations/<tag>.md)
         #[arg(short, long)]
         output: Option<PathBuf>,
 

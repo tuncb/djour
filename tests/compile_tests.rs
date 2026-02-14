@@ -52,7 +52,7 @@ Meeting at 10am with team. #work",
         .stdout(predicate::str::contains("work.md"));
 
     // Verify output file created
-    let output = temp.path().join("compilations/work.md");
+    let output = temp.path().join(".compilations/work.md");
     assert!(output.exists());
 
     // Verify content
@@ -61,6 +61,24 @@ Meeting at 10am with team. #work",
     assert!(content.contains("## 15-01-2025"));
     assert!(content.contains("Meeting at 10am with team"));
     assert!(content.contains("Meeting at 10am with team. #work"));
+}
+
+#[test]
+fn test_compile_uses_hidden_compilations_directory() {
+    let temp = TempDir::new().unwrap();
+    init_journal(&temp);
+
+    create_note(&temp, "2025-01-15.md", "Work content. #work");
+
+    djour_cmd()
+        .current_dir(temp.path())
+        .arg("compile")
+        .arg("work")
+        .assert()
+        .success();
+
+    assert!(temp.path().join(".compilations/work.md").exists());
+    assert!(!temp.path().join("compilations/work.md").exists());
 }
 
 #[test]
@@ -86,7 +104,7 @@ Meeting at 10am with team. #work",
         .success()
         .stdout(predicate::str::is_empty());
 
-    let output = temp.path().join("compilations/work.md");
+    let output = temp.path().join(".compilations/work.md");
     assert!(output.exists());
 }
 
@@ -120,7 +138,7 @@ Regular task here. #work",
         .success();
 
     // Verify output
-    let output = temp.path().join("compilations/work-and-urgent.md");
+    let output = temp.path().join(".compilations/work-and-urgent.md");
     assert!(output.exists());
 
     let content = fs::read_to_string(output).unwrap();
@@ -147,7 +165,7 @@ fn test_compile_or_query() {
         .success();
 
     // Verify output
-    let output = temp.path().join("compilations/work-or-personal.md");
+    let output = temp.path().join(".compilations/work-or-personal.md");
     assert!(output.exists());
 
     let content = fs::read_to_string(output).unwrap();
@@ -174,7 +192,7 @@ fn test_compile_not_query() {
         .success();
 
     // Verify output
-    let output = temp.path().join("compilations/work-and-not-meeting.md");
+    let output = temp.path().join(".compilations/work-and-not-meeting.md");
     assert!(output.exists());
 
     let content = fs::read_to_string(output).unwrap();
@@ -205,7 +223,7 @@ fn test_compile_with_date_filtering() {
         .success();
 
     // Verify output
-    let output = temp.path().join("compilations/work.md");
+    let output = temp.path().join(".compilations/work.md");
     assert!(output.exists());
 
     let content = fs::read_to_string(output).unwrap();
@@ -234,7 +252,7 @@ fn test_compile_format_chronological() {
         .success();
 
     // Verify output
-    let output = temp.path().join("compilations/work.md");
+    let output = temp.path().join(".compilations/work.md");
     let content = fs::read_to_string(output).unwrap();
     assert!(content.contains("## 15-01-2025"));
     assert!(content.contains("## 16-01-2025"));
@@ -265,7 +283,7 @@ fn test_compile_weekly_date_range() {
         .assert()
         .success();
 
-    let output = temp.path().join("compilations/work.md");
+    let output = temp.path().join(".compilations/work.md");
     let content = fs::read_to_string(output).unwrap();
     assert!(content.contains("## 13-01-2025 to 19-01-2025"));
 }
@@ -291,7 +309,7 @@ fn test_compile_monthly_date_range() {
         .assert()
         .success();
 
-    let output = temp.path().join("compilations/work.md");
+    let output = temp.path().join(".compilations/work.md");
     let content = fs::read_to_string(output).unwrap();
     assert!(content.contains("## 01-02-2025 to 28-02-2025"));
 }
@@ -316,7 +334,7 @@ fn test_compile_format_grouped() {
         .success();
 
     // Verify output
-    let output = temp.path().join("compilations/work.md");
+    let output = temp.path().join(".compilations/work.md");
     let content = fs::read_to_string(output).unwrap();
     assert!(content.contains("## From: 2025-01-15.md"));
     assert!(content.contains("## From: 2025-01-16.md"));
@@ -348,7 +366,7 @@ Meeting notes here.",
         .success();
 
     // Verify output
-    let output = temp.path().join("compilations/work.md");
+    let output = temp.path().join(".compilations/work.md");
     let content = fs::read_to_string(output).unwrap();
     // Should include section heading with adjusted level
     assert!(content.contains("Work Section"));
@@ -499,7 +517,7 @@ Third thought about work again. #work",
         .success();
 
     // Verify output
-    let output = temp.path().join("compilations/work.md");
+    let output = temp.path().join(".compilations/work.md");
     let content = fs::read_to_string(output).unwrap();
     assert!(content.contains("First thought about work"));
     assert!(content.contains("First thought about work. #work"));
@@ -535,7 +553,7 @@ fn hello() {
         .assert()
         .success();
 
-    let output = temp.path().join("compilations/work.md");
+    let output = temp.path().join(".compilations/work.md");
     let content = fs::read_to_string(output).unwrap();
     assert!(content.contains("Code sample below."));
     assert!(content.contains("Code sample below. #work"));
@@ -569,7 +587,7 @@ fn test_compile_list_item_with_fenced_code_block() {
         .assert()
         .success();
 
-    let output = temp.path().join("compilations/work.md");
+    let output = temp.path().join(".compilations/work.md");
     let content = fs::read_to_string(output).unwrap();
     assert!(content.contains("Code sample"));
     assert!(content.contains("```bash"));
@@ -602,7 +620,7 @@ This inherits the work tag from parent section. #note",
         .success();
 
     // Verify output includes content with inherited work tag
-    let output = temp.path().join("compilations/work.md");
+    let output = temp.path().join(".compilations/work.md");
     let content = fs::read_to_string(output).unwrap();
     // The paragraph has #note tag, but it should also inherit #work from the parent section
     // So compiling "work" should include this paragraph

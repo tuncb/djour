@@ -28,7 +28,7 @@ djour organizes markdown notes within a designated folder, handling file creatio
 ├── 2025-W03-2025-01-13.md  # weekly mode
 ├── 2025-01.md         # monthly mode
 ├── journal.md         # single mode
-└── compilations/      # generated tag compilations
+└── .compilations/      # generated tag compilations
     └── work.md
 ```
 
@@ -232,7 +232,7 @@ Compiles all content matching a tag into a new markdown file.
 
 | Option | Description |
 |--------|-------------|
-| `--output`, `-o` | Output file path (default: `compilations/<tag>.md`) |
+| `--output`, `-o` | Output file path (default: `.compilations/<tag>.md`) |
 | `--from` | Start date filter |
 | `--to` | End date filter |
 | `--format` | Output format: `grouped`, `chronological` (default: `chronological`) |

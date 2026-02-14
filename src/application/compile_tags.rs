@@ -18,7 +18,7 @@ pub struct CompileOptions {
     /// Tag query to filter by
     pub query: String,
 
-    /// Output file path (None = default: compilations/<tag>.md)
+    /// Output file path (None = default: .compilations/<tag>.md)
     pub output: Option<PathBuf>,
 
     /// Start date filter (inclusive)
@@ -127,11 +127,11 @@ impl CompileTagsService {
                 self.repository.root().join(path)
             }
         } else {
-            // Default: compilations/<query>.md (sanitize query string)
+            // Default: .compilations/<query>.md (sanitize query string)
             let sanitized = sanitize_filename(&options.query);
             self.repository
                 .root()
-                .join("compilations")
+                .join(".compilations")
                 .join(format!("{}.md", sanitized))
         };
 

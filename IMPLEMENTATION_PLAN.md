@@ -268,7 +268,7 @@ pub enum CompilationFormat {
 3. Filter by tag query
 4. Sort/group by format
 5. Generate markdown output
-6. Write to compilations/ directory
+6. Write to .compilations/ directory
 
 ## Implementation Phases
 

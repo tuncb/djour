@@ -164,7 +164,7 @@ djour compile <QUERY> [OPTIONS]
 ```
 
 - `<QUERY>`: tag query expression
-- `-o, --output <PATH>`: output file (default: `compilations/<tag>.md`)
+- `-o, --output <PATH>`: output file (default: `.compilations/<tag>.md`)
 - `--from <DATE>`: start date filter (`DD-MM-YYYY`)
 - `--to <DATE>`: end date filter (`DD-MM-YYYY`)
 - `--format <FORMAT>`: `chronological|grouped` (default: `chronological`)
