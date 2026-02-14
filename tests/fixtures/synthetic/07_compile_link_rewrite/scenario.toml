@@ -1,0 +1,4 @@
+[[command]]
+args = ["compile", "work"]
+expect_exit = 0
+stdout_contains = ["work.md"]

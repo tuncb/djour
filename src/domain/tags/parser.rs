@@ -3,13 +3,24 @@
 use chrono::NaiveDate;
 use pulldown_cmark::{CodeBlockKind, Event, Parser as MdParser, Tag, TagEnd};
 use regex::Regex;
-use std::path::{Path, PathBuf};
+use std::ffi::{OsStr, OsString};
+use std::path::{Component, Path, PathBuf};
 use std::sync::OnceLock;
 
 /// Regex for matching hashtags: #word, #word-with-dashes, #word_with_underscores
 fn tag_regex() -> &'static Regex {
     static REGEX: OnceLock<Regex> = OnceLock::new();
     REGEX.get_or_init(|| Regex::new(r"#([a-zA-Z0-9_-]+)").unwrap())
+}
+
+fn html_attr_double_quote_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| Regex::new(r#"(?i)\b(src|href)\s*=\s*"([^"]+)""#).unwrap())
+}
+
+fn html_attr_single_quote_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| Regex::new(r#"(?i)\b(src|href)\s*=\s*'([^']+)'"#).unwrap())
 }
 
 /// Extract all tags from a string (case-insensitive, normalized to lowercase)
@@ -23,6 +34,190 @@ fn extract_tags(text: &str) -> Vec<String> {
 /// Remove tags from text, returning cleaned text
 fn strip_tags(text: &str) -> String {
     tag_regex().replace_all(text, "").trim().to_string()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_to_active(
+    fragment: &str,
+    in_code_block: bool,
+    in_heading: bool,
+    in_paragraph: bool,
+    code_block_text: &mut String,
+    current_heading_text: &mut String,
+    current_paragraph: &mut String,
+    item_stack: &mut [String],
+) {
+    if in_code_block {
+        code_block_text.push_str(fragment);
+    } else if in_heading {
+        current_heading_text.push_str(fragment);
+    } else if in_paragraph {
+        current_paragraph.push_str(fragment);
+    } else if let Some(item_text) = item_stack.last_mut() {
+        item_text.push_str(fragment);
+    }
+}
+
+fn has_uri_scheme(target: &str) -> bool {
+    let mut chars = target.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+
+    if !first.is_ascii_alphabetic() {
+        return false;
+    }
+
+    for c in chars {
+        match c {
+            ':' => return true,
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '+' | '-' | '.' => {}
+            _ => return false,
+        }
+    }
+
+    false
+}
+
+fn split_target_suffix(target: &str) -> (&str, &str) {
+    let query_pos = target.find('?');
+    let fragment_pos = target.find('#');
+
+    let split_pos = match (query_pos, fragment_pos) {
+        (Some(q), Some(f)) => Some(q.min(f)),
+        (Some(q), None) => Some(q),
+        (None, Some(f)) => Some(f),
+        (None, None) => None,
+    };
+
+    match split_pos {
+        Some(pos) => (&target[..pos], &target[pos..]),
+        None => (target, ""),
+    }
+}
+
+fn normalize_components(path: &Path) -> (Option<OsString>, bool, Vec<OsString>) {
+    let mut prefix: Option<OsString> = None;
+    let mut has_root = false;
+    let mut segments: Vec<OsString> = Vec::new();
+
+    for component in path.components() {
+        match component {
+            Component::Prefix(p) => prefix = Some(p.as_os_str().to_os_string()),
+            Component::RootDir => has_root = true,
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if let Some(last) = segments.last() {
+                    if last != OsStr::new("..") {
+                        segments.pop();
+                        continue;
+                    }
+                }
+
+                if !has_root {
+                    segments.push(OsString::from(".."));
+                }
+            }
+            Component::Normal(seg) => segments.push(seg.to_os_string()),
+        }
+    }
+
+    (prefix, has_root, segments)
+}
+
+fn relative_path(from: &Path, to: &Path) -> Option<PathBuf> {
+    let (from_prefix, from_root, from_segments) = normalize_components(from);
+    let (to_prefix, to_root, to_segments) = normalize_components(to);
+
+    if from_prefix != to_prefix || from_root != to_root {
+        return None;
+    }
+
+    let mut common_len = 0usize;
+    let max_common = from_segments.len().min(to_segments.len());
+    while common_len < max_common && from_segments[common_len] == to_segments[common_len] {
+        common_len += 1;
+    }
+
+    let mut rel = PathBuf::new();
+    for _ in common_len..from_segments.len() {
+        rel.push("..");
+    }
+    for segment in &to_segments[common_len..] {
+        rel.push(segment);
+    }
+
+    if rel.as_os_str().is_empty() {
+        rel.push(".");
+    }
+
+    Some(rel)
+}
+
+fn rewrite_link_target(target: &str, source_file: &Path, output_file: Option<&Path>) -> String {
+    let Some(output_file) = output_file else {
+        return target.to_string();
+    };
+
+    if target.is_empty()
+        || target.starts_with('#')
+        || target.starts_with('?')
+        || target.starts_with("//")
+        || target.starts_with('/')
+        || target.starts_with('\\')
+        || has_uri_scheme(target)
+    {
+        return target.to_string();
+    }
+
+    let (path_part, suffix) = split_target_suffix(target);
+    if path_part.is_empty() {
+        return target.to_string();
+    }
+
+    let source_dir = source_file.parent().unwrap_or_else(|| Path::new(""));
+    let output_dir = output_file.parent().unwrap_or_else(|| Path::new(""));
+    let target_abs = source_dir.join(path_part);
+
+    if let Some(rel) = relative_path(output_dir, &target_abs) {
+        let mut rewritten = rel.to_string_lossy().replace('\\', "/");
+        rewritten.push_str(suffix);
+        rewritten
+    } else {
+        target.to_string()
+    }
+}
+
+fn rewrite_html_targets(html: &str, source_file: &Path, output_file: Option<&Path>) -> String {
+    let rewritten_double = html_attr_double_quote_regex()
+        .replace_all(html, |caps: &regex::Captures<'_>| {
+            let attr = &caps[1];
+            let destination = rewrite_link_target(&caps[2], source_file, output_file);
+            format!(r#"{attr}="{destination}""#)
+        })
+        .to_string();
+
+    html_attr_single_quote_regex()
+        .replace_all(&rewritten_double, |caps: &regex::Captures<'_>| {
+            let attr = &caps[1];
+            let destination = rewrite_link_target(&caps[2], source_file, output_file);
+            format!(r#"{attr}='{destination}'"#)
+        })
+        .to_string()
+}
+
+fn link_or_image_tail(destination: &str, title: &str) -> String {
+    if title.is_empty() {
+        format!("]({})", destination)
+    } else {
+        format!("]({} \"{}\")", destination, title.replace('"', "\\\""))
+    }
+}
+
+#[derive(Debug, Clone)]
+enum InlineConstruct {
+    Link { destination: String, title: String },
+    Image { destination: String, title: String },
 }
 
 /// Context information about where tagged content came from
@@ -140,6 +335,17 @@ impl TagParser {
         source_file: &Path,
         date: Option<NaiveDate>,
     ) -> Vec<TaggedContent> {
+        Self::extract_from_markdown_for_output(content, source_file, date, None)
+    }
+
+    /// Extract tagged content from markdown, optionally rebasing markdown paths
+    /// for links and images so they resolve from the compilation output file.
+    pub fn extract_from_markdown_for_output(
+        content: &str,
+        source_file: &Path,
+        date: Option<NaiveDate>,
+        output_file: Option<&Path>,
+    ) -> Vec<TaggedContent> {
         let mut results = Vec::new();
         let mut section_stack = SectionStack::new();
         let mut list_tag_stack: Vec<Vec<String>> = Vec::new();
@@ -157,6 +363,7 @@ impl TagParser {
         let mut code_block_info = String::new();
         let mut code_block_text = String::new();
         let mut pending_code_block_target: Option<usize> = None;
+        let mut inline_stack: Vec<InlineConstruct> = Vec::new();
 
         let extend_unique = |dest: &mut Vec<String>, tags: Vec<String>| {
             for tag in tags {
@@ -310,27 +517,140 @@ impl TagParser {
                     }
                 }
 
-                Event::Text(text) => {
-                    if in_code_block {
-                        code_block_text.push_str(&text);
-                    } else if in_heading {
-                        current_heading_text.push_str(&text);
-                    } else if in_paragraph {
-                        current_paragraph.push_str(&text);
-                    } else if let Some(item_text) = item_stack.last_mut() {
-                        item_text.push_str(&text);
+                Event::Start(Tag::Link {
+                    dest_url, title, ..
+                }) => {
+                    let destination = rewrite_link_target(&dest_url, source_file, output_file);
+                    append_to_active(
+                        "[",
+                        in_code_block,
+                        in_heading,
+                        in_paragraph,
+                        &mut code_block_text,
+                        &mut current_heading_text,
+                        &mut current_paragraph,
+                        &mut item_stack,
+                    );
+                    inline_stack.push(InlineConstruct::Link {
+                        destination,
+                        title: title.to_string(),
+                    });
+                }
+
+                Event::End(TagEnd::Link) => {
+                    if let Some(InlineConstruct::Link { destination, title }) = inline_stack.pop() {
+                        let tail = link_or_image_tail(&destination, &title);
+                        append_to_active(
+                            &tail,
+                            in_code_block,
+                            in_heading,
+                            in_paragraph,
+                            &mut code_block_text,
+                            &mut current_heading_text,
+                            &mut current_paragraph,
+                            &mut item_stack,
+                        );
                     }
                 }
 
+                Event::Start(Tag::Image {
+                    dest_url, title, ..
+                }) => {
+                    let destination = rewrite_link_target(&dest_url, source_file, output_file);
+                    append_to_active(
+                        "![",
+                        in_code_block,
+                        in_heading,
+                        in_paragraph,
+                        &mut code_block_text,
+                        &mut current_heading_text,
+                        &mut current_paragraph,
+                        &mut item_stack,
+                    );
+                    inline_stack.push(InlineConstruct::Image {
+                        destination,
+                        title: title.to_string(),
+                    });
+                }
+
+                Event::End(TagEnd::Image) => {
+                    if let Some(InlineConstruct::Image { destination, title }) = inline_stack.pop()
+                    {
+                        let tail = link_or_image_tail(&destination, &title);
+                        append_to_active(
+                            &tail,
+                            in_code_block,
+                            in_heading,
+                            in_paragraph,
+                            &mut code_block_text,
+                            &mut current_heading_text,
+                            &mut current_paragraph,
+                            &mut item_stack,
+                        );
+                    }
+                }
+
+                Event::Text(text) => {
+                    append_to_active(
+                        &text,
+                        in_code_block,
+                        in_heading,
+                        in_paragraph,
+                        &mut code_block_text,
+                        &mut current_heading_text,
+                        &mut current_paragraph,
+                        &mut item_stack,
+                    );
+                }
+
                 Event::Code(code) => {
-                    if in_paragraph {
-                        current_paragraph.push('`');
-                        current_paragraph.push_str(&code);
-                        current_paragraph.push('`');
-                    } else if let Some(item_text) = item_stack.last_mut() {
-                        item_text.push('`');
-                        item_text.push_str(&code);
-                        item_text.push('`');
+                    let snippet = format!("`{}`", code);
+                    append_to_active(
+                        &snippet,
+                        in_code_block,
+                        in_heading,
+                        in_paragraph,
+                        &mut code_block_text,
+                        &mut current_heading_text,
+                        &mut current_paragraph,
+                        &mut item_stack,
+                    );
+                }
+
+                Event::Html(html) => {
+                    let rewritten_html = rewrite_html_targets(&html, source_file, output_file);
+                    if in_code_block || in_heading || in_paragraph || !item_stack.is_empty() {
+                        append_to_active(
+                            &rewritten_html,
+                            in_code_block,
+                            in_heading,
+                            in_paragraph,
+                            &mut code_block_text,
+                            &mut current_heading_text,
+                            &mut current_paragraph,
+                            &mut item_stack,
+                        );
+                    } else {
+                        let html_tags = extract_tags(&rewritten_html);
+                        let mut all_tags = section_stack.current_tags();
+                        if let Some(list_tags) = list_tag_stack.last() {
+                            extend_unique(&mut all_tags, list_tags.clone());
+                        }
+                        extend_unique(&mut all_tags, html_tags);
+
+                        let content_clean = strip_tags(&rewritten_html);
+                        let content_raw = rewritten_html.trim().to_string();
+                        if !content_clean.trim().is_empty() && !all_tags.is_empty() {
+                            results.push(TaggedContent::new(
+                                all_tags,
+                                content_raw,
+                                source_file.to_path_buf(),
+                                date,
+                                section_stack
+                                    .current_context()
+                                    .unwrap_or(TagContext::Paragraph),
+                            ));
+                        }
                     }
                 }
 
@@ -411,6 +731,7 @@ impl TagParser {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
 
     #[test]
     fn test_extract_tags() {
@@ -672,6 +993,76 @@ Use the `git commit` command here. #git #tutorial
 
         assert_eq!(results.len(), 1);
         assert!(results[0].content.contains("`git commit`"));
+    }
+
+    #[test]
+    fn test_markdown_link_preserved() {
+        let markdown = r#"
+See [Design Doc](./docs/design.md). #work
+"#;
+
+        let results = TagParser::extract_from_markdown(markdown, Path::new("test.md"), None);
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0]
+            .content
+            .contains("[Design Doc](./docs/design.md)"));
+    }
+
+    #[test]
+    fn test_markdown_image_preserved() {
+        let markdown = r#"
+![Diagram](./images/diagram.png) #work
+"#;
+
+        let results = TagParser::extract_from_markdown(markdown, Path::new("test.md"), None);
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0]
+            .content
+            .contains("![Diagram](./images/diagram.png)"));
+    }
+
+    #[test]
+    fn test_markdown_paths_rewritten_for_output_file() {
+        let temp = TempDir::new().unwrap();
+        let source = temp.path().join("2025-01-15.md");
+        let output = temp.path().join(".compilations").join("work.md");
+        let markdown = r#"
+See [Design Doc](./docs/design.md). #work
+
+![Diagram](./images/diagram.png) #work
+"#;
+
+        let results =
+            TagParser::extract_from_markdown_for_output(markdown, &source, None, Some(&output));
+
+        let combined = results
+            .iter()
+            .map(|r| r.content.as_str())
+            .collect::<Vec<&str>>()
+            .join("\n");
+
+        assert!(combined.contains("[Design Doc](../docs/design.md)"));
+        assert!(combined.contains("![Diagram](../images/diagram.png)"));
+    }
+
+    #[test]
+    fn test_external_link_not_rewritten() {
+        let temp = TempDir::new().unwrap();
+        let source = temp.path().join("2025-01-15.md");
+        let output = temp.path().join(".compilations").join("work.md");
+        let markdown = r#"
+See [Website](https://example.com/docs). #work
+"#;
+
+        let results =
+            TagParser::extract_from_markdown_for_output(markdown, &source, None, Some(&output));
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0]
+            .content
+            .contains("[Website](https://example.com/docs)"));
     }
 
     #[test]

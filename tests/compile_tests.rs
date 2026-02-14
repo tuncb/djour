@@ -403,6 +403,35 @@ fn test_compile_custom_output_path() {
 }
 
 #[test]
+fn test_compile_rewrites_relative_links_and_images_for_output_folder() {
+    let temp = TempDir::new().unwrap();
+    init_journal(&temp);
+
+    create_note(
+        &temp,
+        "2025-01-15.md",
+        "See [Design Doc](./docs/design.md). #work
+
+![Diagram](./images/diagram.png) #work
+
+See [External](https://example.com). #work",
+    );
+
+    djour_cmd()
+        .current_dir(temp.path())
+        .arg("compile")
+        .arg("work")
+        .assert()
+        .success();
+
+    let output = temp.path().join(".compilations/work.md");
+    let content = fs::read_to_string(output).unwrap();
+    assert!(content.contains("[Design Doc](../docs/design.md)"));
+    assert!(content.contains("![Diagram](../images/diagram.png) #work"));
+    assert!(content.contains("[External](https://example.com)"));
+}
+
+#[test]
 fn test_compile_empty_query_fails() {
     let temp = TempDir::new().unwrap();
     init_journal(&temp);

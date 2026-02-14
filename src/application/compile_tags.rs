@@ -63,63 +63,8 @@ impl CompileTagsService {
         // 2. Load config to get mode
         let config = self.repository.load_config()?;
 
-        // 3. List all note files (with date filters)
-        let notes = self.repository.list_notes(
-            config.get_mode(),
-            options.from,
-            options.to,
-            None, // No limit - get all notes
-        )?;
-
-        if notes.is_empty() {
-            return Err(DjourError::TagNotFound(format!(
-                "No notes found for query: {}",
-                options.query
-            )));
-        }
-
-        // 4. Parse all files and extract tagged content
-        let mut all_content: Vec<TaggedContent> = Vec::new();
-
-        for note in notes {
-            let content = self.repository.read_note(&note.filename)?;
-            if content.is_empty() {
-                continue;
-            }
-
-            let file_path = self.repository.root().join(&note.filename);
-            let tagged = TagParser::extract_from_markdown(&content, &file_path, note.date);
-
-            all_content.extend(tagged);
-        }
-
-        // 5. Filter by query
-        let filtered = TagCompiler::filter(all_content, &query);
-
-        if filtered.is_empty() {
-            return Err(DjourError::TagNotFound(format!(
-                "No content found matching query: {}",
-                options.query
-            )));
-        }
-
-        // 6. Generate markdown output
-        let date_style = match config.get_mode() {
-            JournalMode::Weekly => CompilationDateStyle::WeekRange,
-            JournalMode::Monthly => CompilationDateStyle::MonthRange,
-            _ => CompilationDateStyle::SingleDate,
-        };
-
-        let markdown = TagCompiler::to_markdown(
-            filtered,
-            &query,
-            options.format,
-            date_style,
-            options.include_context,
-        );
-
-        // 7. Determine output path
-        let output_path = if let Some(path) = options.output {
+        // 3. Determine output path
+        let output_path = if let Some(path) = options.output.clone() {
             // Use provided path
             if path.is_absolute() {
                 path
@@ -134,6 +79,66 @@ impl CompileTagsService {
                 .join(".compilations")
                 .join(format!("{}.md", sanitized))
         };
+
+        // 4. List all note files (with date filters)
+        let notes = self.repository.list_notes(
+            config.get_mode(),
+            options.from,
+            options.to,
+            None, // No limit - get all notes
+        )?;
+
+        if notes.is_empty() {
+            return Err(DjourError::TagNotFound(format!(
+                "No notes found for query: {}",
+                options.query
+            )));
+        }
+
+        // 5. Parse all files and extract tagged content
+        let mut all_content: Vec<TaggedContent> = Vec::new();
+
+        for note in notes {
+            let content = self.repository.read_note(&note.filename)?;
+            if content.is_empty() {
+                continue;
+            }
+
+            let file_path = self.repository.root().join(&note.filename);
+            let tagged = TagParser::extract_from_markdown_for_output(
+                &content,
+                &file_path,
+                note.date,
+                Some(&output_path),
+            );
+
+            all_content.extend(tagged);
+        }
+
+        // 6. Filter by query
+        let filtered = TagCompiler::filter(all_content, &query);
+
+        if filtered.is_empty() {
+            return Err(DjourError::TagNotFound(format!(
+                "No content found matching query: {}",
+                options.query
+            )));
+        }
+
+        // 7. Generate markdown output
+        let date_style = match config.get_mode() {
+            JournalMode::Weekly => CompilationDateStyle::WeekRange,
+            JournalMode::Monthly => CompilationDateStyle::MonthRange,
+            _ => CompilationDateStyle::SingleDate,
+        };
+
+        let markdown = TagCompiler::to_markdown(
+            filtered,
+            &query,
+            options.format,
+            date_style,
+            options.include_context,
+        );
 
         // 8. Write output file
         // Convert absolute path to relative for repository.write_note
