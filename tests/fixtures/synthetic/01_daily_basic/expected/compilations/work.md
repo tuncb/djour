@@ -3,9 +3,9 @@
 
 ## 13-01-2025
 
-Monday planning line.
+Monday planning line. #work
 
 
 ## 14-01-2025
 
-Tuesday deep focus.
+Tuesday deep focus. #work #focus

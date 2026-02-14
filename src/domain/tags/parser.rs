@@ -43,7 +43,7 @@ pub struct TaggedContent {
     /// All tags applying to this content (including inherited)
     pub tags: Vec<String>,
 
-    /// The actual content text (tags removed)
+    /// The original content text (tags preserved)
     pub content: String,
 
     /// Source file this came from
@@ -211,10 +211,11 @@ impl TagParser {
                     extend_unique(&mut all_tags, item_tags);
 
                     let content_clean = strip_tags(&item_text);
+                    let content_raw = item_text.trim().to_string();
                     if !content_clean.trim().is_empty() && !all_tags.is_empty() {
                         results.push(TaggedContent::new(
                             all_tags,
-                            content_clean,
+                            content_raw,
                             source_file.to_path_buf(),
                             date,
                             section_stack
@@ -238,6 +239,7 @@ impl TagParser {
                     // Extract tags from heading
                     let heading_tags = extract_tags(&current_heading_text);
                     let heading_clean = strip_tags(&current_heading_text);
+                    let heading_raw = current_heading_text.trim().to_string();
 
                     // Update section stack
                     section_stack.push_heading(
@@ -250,7 +252,7 @@ impl TagParser {
                     if !heading_tags.is_empty() && !heading_clean.trim().is_empty() {
                         results.push(TaggedContent::new(
                             section_stack.current_tags(),
-                            heading_clean.clone(),
+                            heading_raw,
                             source_file.to_path_buf(),
                             date,
                             TagContext::Section {
@@ -279,6 +281,7 @@ impl TagParser {
                     }
 
                     let content_clean = strip_tags(&current_paragraph);
+                    let content_raw = current_paragraph.trim().to_string();
 
                     if content_clean.trim().is_empty() && !para_tags.is_empty() {
                         // Tag-only paragraph can act as a list tag context for a following list
@@ -294,7 +297,7 @@ impl TagParser {
                         if !content_clean.trim().is_empty() && !all_tags.is_empty() {
                             results.push(TaggedContent::new(
                                 all_tags,
-                                content_clean,
+                                content_raw,
                                 source_file.to_path_buf(),
                                 date,
                                 section_stack
@@ -494,7 +497,7 @@ Action items assigned.
             })
             .unwrap();
         assert_eq!(heading.tags, vec!["work", "urgent"]);
-        assert_eq!(heading.content, "Meeting Notes");
+        assert_eq!(heading.content, "Meeting Notes #work #urgent");
 
         let paragraph = results
             .iter()
@@ -515,7 +518,7 @@ This paragraph has tags. #idea #garden
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].tags, vec!["idea", "garden"]);
-        assert_eq!(results[0].content, "This paragraph has tags.");
+        assert_eq!(results[0].content, "This paragraph has tags. #idea #garden");
         assert_eq!(results[0].context, TagContext::Paragraph);
     }
 
@@ -656,7 +659,7 @@ Regular paragraph with no tags.
 
         // Heading itself should be captured
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].content, "Heading");
+        assert_eq!(results[0].content, "Heading #tag");
     }
 
     #[test]

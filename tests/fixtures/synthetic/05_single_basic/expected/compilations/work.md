@@ -1,3 +1,3 @@
 # Compilation: #work
 
-Single stream task.
+Single stream task. #work

@@ -60,6 +60,7 @@ Meeting at 10am with team. #work",
     assert!(content.contains("# Compilation: #work"));
     assert!(content.contains("## 15-01-2025"));
     assert!(content.contains("Meeting at 10am with team"));
+    assert!(content.contains("Meeting at 10am with team. #work"));
 }
 
 #[test]
@@ -501,8 +502,10 @@ Third thought about work again. #work",
     let output = temp.path().join("compilations/work.md");
     let content = fs::read_to_string(output).unwrap();
     assert!(content.contains("First thought about work"));
+    assert!(content.contains("First thought about work. #work"));
     assert!(!content.contains("Second thought about personal"));
     assert!(content.contains("Third thought about work again"));
+    assert!(content.contains("Third thought about work again. #work"));
 }
 
 #[test]
@@ -535,6 +538,7 @@ fn hello() {
     let output = temp.path().join("compilations/work.md");
     let content = fs::read_to_string(output).unwrap();
     assert!(content.contains("Code sample below."));
+    assert!(content.contains("Code sample below. #work"));
     assert!(content.contains("```rust"));
     assert!(content.contains("fn hello()"));
     assert!(content.contains("```"));
