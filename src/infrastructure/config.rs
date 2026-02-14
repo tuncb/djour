@@ -2,7 +2,6 @@
 
 use crate::domain::JournalMode;
 use crate::error::{DjourError, Result};
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
@@ -12,7 +11,6 @@ use std::str::FromStr;
 pub struct Config {
     pub mode: JournalMode,
     pub editor: String,
-    pub created: DateTime<Utc>,
 }
 
 impl Config {
@@ -21,7 +19,6 @@ impl Config {
         Config {
             mode,
             editor: Self::detect_default_editor(),
-            created: Utc::now(),
         }
     }
 
@@ -157,7 +154,6 @@ mod tests {
         // Verify it matches
         assert_eq!(loaded.mode, config.mode);
         assert_eq!(loaded.editor, config.editor);
-        assert_eq!(loaded.created, config.created);
     }
 
     #[test]
@@ -179,7 +175,6 @@ mod tests {
         let config = Config {
             mode: JournalMode::Daily,
             editor: "default-editor".to_string(),
-            created: Utc::now(),
         };
 
         // Without environment variables, should use config value

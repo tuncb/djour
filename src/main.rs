@@ -44,7 +44,6 @@ fn run(cli: Cli) -> Result<(), DjourError> {
                 let config = service.list()?;
                 println!("mode = {}", format!("{:?}", config.mode).to_lowercase());
                 println!("editor = {}", config.editor);
-                println!("created = {}", config.created.to_rfc3339());
                 Ok(())
             } else if let Some(k) = key {
                 if let Some(v) = value {
@@ -61,7 +60,7 @@ fn run(cli: Cli) -> Result<(), DjourError> {
             } else {
                 // No key provided, show usage
                 println!("Usage: djour config [--list | <key> [<value>]]");
-                println!("Valid keys: mode, editor, created");
+                println!("Valid keys: mode, editor");
                 Ok(())
             }
         }

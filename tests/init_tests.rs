@@ -25,6 +25,7 @@ fn test_init_creates_config() {
     // Check config content
     let content = fs::read_to_string(config_path).unwrap();
     assert!(content.contains("mode = \"daily\""));
+    assert!(!content.contains("created"));
 }
 
 #[test]
@@ -111,5 +112,21 @@ fn test_config_list() {
         .assert()
         .success()
         .stdout(predicate::str::contains("mode"))
-        .stdout(predicate::str::contains("editor"));
+        .stdout(predicate::str::contains("editor"))
+        .stdout(predicate::str::contains("created").not());
+}
+
+#[test]
+fn test_config_get_created_fails() {
+    let temp = TempDir::new().unwrap();
+
+    djour_cmd().arg("init").arg(temp.path()).assert().success();
+
+    djour_cmd()
+        .current_dir(temp.path())
+        .arg("config")
+        .arg("created")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Unknown config key: 'created'"));
 }

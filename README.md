@@ -189,7 +189,6 @@ djour mode <MODE> [OPTIONS]
 
 - `mode`: journal mode
 - `editor`: editor command
-- `created`: creation timestamp (read-only)
 
 ## Environment Variables
 

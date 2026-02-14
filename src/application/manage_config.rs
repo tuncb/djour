@@ -23,9 +23,8 @@ impl ConfigService {
         match key {
             "mode" => Ok(format!("{:?}", config.mode).to_lowercase()),
             "editor" => Ok(config.editor.clone()),
-            "created" => Ok(config.created.to_rfc3339()),
             _ => Err(DjourError::Config(format!(
-                "Unknown config key: '{}'. Valid keys are: mode, editor, created",
+                "Unknown config key: '{}'. Valid keys are: mode, editor",
                 key
             ))),
         }
@@ -42,11 +41,6 @@ impl ConfigService {
             }
             "editor" => {
                 config.editor = value.to_string();
-            }
-            "created" => {
-                return Err(DjourError::Config(
-                    "Cannot modify 'created' field (read-only)".to_string(),
-                ));
             }
             _ => {
                 return Err(DjourError::Config(format!(
