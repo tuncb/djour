@@ -217,7 +217,7 @@ impl TagCompiler {
         let sorted = Self::sort_chronological(content);
         let mut current_date: Option<NaiveDate> = None;
 
-        for tc in sorted {
+        for (idx, tc) in sorted.iter().enumerate() {
             // Date header (if changed)
             if tc.date != current_date {
                 if let Some(date) = tc.date {
@@ -243,7 +243,7 @@ impl TagCompiler {
 
             // Content
             output.push_str(&tc.content);
-            output.push_str("\n\n");
+            output.push_str(Self::content_separator(&sorted, idx));
         }
     }
 
@@ -268,7 +268,7 @@ impl TagCompiler {
                 output.push_str(&format!("\n## From: {}\n\n", filename));
             }
 
-            for tc in items {
+            for (idx, tc) in items.iter().enumerate() {
                 // Context heading (if available and requested)
                 if include_context {
                     if let TagContext::Section { heading, level } = &tc.context {
@@ -281,9 +281,59 @@ impl TagCompiler {
 
                 // Content
                 output.push_str(&tc.content);
-                output.push_str("\n\n");
+                output.push_str(Self::content_separator(&items, idx));
             }
         }
+    }
+
+    fn content_separator(items: &[TaggedContent], idx: usize) -> &'static str {
+        if idx + 1 >= items.len() {
+            return "\n\n";
+        }
+
+        if Self::should_keep_tight_spacing(&items[idx], &items[idx + 1]) {
+            "\n"
+        } else {
+            "\n\n"
+        }
+    }
+
+    fn should_keep_tight_spacing(current: &TaggedContent, next: &TaggedContent) -> bool {
+        current.source_file == next.source_file
+            && current.date == next.date
+            && matches!(current.context, TagContext::Paragraph)
+            && matches!(next.context, TagContext::Paragraph)
+            && Self::looks_like_list_item(&current.content)
+            && Self::looks_like_list_item(&next.content)
+    }
+
+    fn looks_like_list_item(content: &str) -> bool {
+        let first_non_empty = content
+            .lines()
+            .find(|line| !line.trim().is_empty())
+            .unwrap_or_default()
+            .trim_start();
+
+        if first_non_empty.starts_with("- ")
+            || first_non_empty.starts_with("* ")
+            || first_non_empty.starts_with("+ ")
+        {
+            return true;
+        }
+
+        let mut chars = first_non_empty.chars().peekable();
+        let mut has_digit = false;
+
+        while matches!(chars.peek(), Some(c) if c.is_ascii_digit()) {
+            has_digit = true;
+            chars.next();
+        }
+
+        if !has_digit {
+            return false;
+        }
+
+        matches!(chars.next(), Some('.' | ')')) && matches!(chars.next(), Some(' '))
     }
 
     fn format_date_header(date: NaiveDate, date_style: CompilationDateStyle) -> String {
@@ -701,5 +751,48 @@ mod tests {
 
         assert!(!markdown.ends_with("\n\n"));
         assert!(markdown.ends_with('\n'));
+    }
+
+    #[test]
+    fn test_to_markdown_keeps_tight_spacing_for_list_items() {
+        let date = NaiveDate::from_ymd_opt(2025, 1, 15);
+        let content = vec![
+            create_test_content(vec!["work"], "- bla", "2025-01-15.md", date),
+            create_test_content(vec!["work"], "- bla1", "2025-01-15.md", date),
+            create_test_content(vec!["work"], "- bla2", "2025-01-15.md", date),
+        ];
+
+        let query = TagQuery::parse("work").unwrap();
+        let markdown = TagCompiler::to_markdown(
+            content,
+            &query,
+            CompilationFormat::Chronological,
+            CompilationDateStyle::SingleDate,
+            false,
+        );
+
+        assert!(markdown.contains("- bla\n- bla1\n- bla2"));
+        assert!(!markdown.contains("- bla\n\n- bla1"));
+        assert!(!markdown.contains("- bla1\n\n- bla2"));
+    }
+
+    #[test]
+    fn test_to_markdown_keeps_paragraph_spacing() {
+        let date = NaiveDate::from_ymd_opt(2025, 1, 15);
+        let content = vec![
+            create_test_content(vec!["work"], "first paragraph", "2025-01-15.md", date),
+            create_test_content(vec!["work"], "second paragraph", "2025-01-15.md", date),
+        ];
+
+        let query = TagQuery::parse("work").unwrap();
+        let markdown = TagCompiler::to_markdown(
+            content,
+            &query,
+            CompilationFormat::Chronological,
+            CompilationDateStyle::SingleDate,
+            false,
+        );
+
+        assert!(markdown.contains("first paragraph\n\nsecond paragraph"));
     }
 }

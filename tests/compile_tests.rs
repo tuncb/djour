@@ -625,6 +625,35 @@ fn test_compile_list_item_with_fenced_code_block() {
 }
 
 #[test]
+fn test_compile_tagged_list_from_paragraph_keeps_tight_spacing() {
+    let temp = TempDir::new().unwrap();
+    init_journal(&temp);
+
+    create_note(
+        &temp,
+        "2025-01-15.md",
+        r#"#work
+- bla
+- bla1
+- bla2
+"#,
+    );
+
+    djour_cmd()
+        .current_dir(temp.path())
+        .arg("compile")
+        .arg("work")
+        .assert()
+        .success();
+
+    let output = temp.path().join(".compilations/work.md");
+    let content = fs::read_to_string(output).unwrap();
+    assert!(content.contains("- bla\n- bla1\n- bla2"));
+    assert!(!content.contains("- bla\n\n- bla1"));
+    assert!(!content.contains("- bla1\n\n- bla2"));
+}
+
+#[test]
 fn test_compile_section_tag_preserves_nested_list_formatting() {
     let temp = TempDir::new().unwrap();
     init_journal(&temp);
