@@ -886,9 +886,10 @@ mod tests {
     }
 
     #[test]
-    fn test_to_markdown_supports_mixed_span_and_rendered_payloads() {
+    fn test_to_markdown_supports_multiple_span_payloads() {
         let date = NaiveDate::from_ymd_opt(2025, 1, 15);
         let source: Arc<str> = Arc::from("from span #work");
+        let second_source: Arc<str> = Arc::from("from second span #work");
         let content = vec![
             create_test_span_content(
                 vec!["work"],
@@ -897,7 +898,13 @@ mod tests {
                 "2025-01-15.md",
                 date,
             ),
-            create_test_content(vec!["work"], "from rendered #work", "2025-01-15.md", date),
+            create_test_span_content(
+                vec!["work"],
+                second_source,
+                SourceSpan::new(0, "from second span #work".len()),
+                "2025-01-15.md",
+                date,
+            ),
         ];
 
         let query = TagQuery::parse("work").unwrap();
@@ -910,7 +917,7 @@ mod tests {
         );
 
         assert!(markdown.contains("from span #work"));
-        assert!(markdown.contains("from rendered #work"));
+        assert!(markdown.contains("from second span #work"));
     }
 
     #[test]

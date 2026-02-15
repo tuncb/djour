@@ -257,35 +257,6 @@ fn link_or_image_tail(destination: &str, title: &str) -> String {
     }
 }
 
-fn format_list_item_markdown(item_text: &str, depth: usize) -> String {
-    let trimmed = item_text.trim();
-    if trimmed.is_empty() {
-        return String::new();
-    }
-
-    let base_indent = "  ".repeat(depth.saturating_sub(1));
-    let continuation_indent = format!("{}  ", base_indent);
-
-    let mut lines = trimmed.lines();
-    let first_line = lines.next().unwrap_or_default();
-    let mut rendered = if first_line.is_empty() {
-        format!("{}-", base_indent)
-    } else {
-        format!("{}- {}", base_indent, first_line)
-    };
-
-    for line in lines {
-        rendered.push('\n');
-        if line.is_empty() {
-            continue;
-        }
-        rendered.push_str(&continuation_indent);
-        rendered.push_str(line);
-    }
-
-    rendered
-}
-
 fn trim_section_body(raw: &str) -> &str {
     raw.trim_matches(|c| c == '\r' || c == '\n')
 }
@@ -477,8 +448,6 @@ impl SourceSpan {
 pub enum ContentPayload {
     /// Raw byte span into source markdown.
     Span { span: SourceSpan, source: Arc<str> },
-    /// Rendered content fallback.
-    Rendered(String),
 }
 
 /// A piece of content with associated tags
@@ -499,7 +468,7 @@ pub struct TaggedContent {
     /// Context about where this content came from
     pub context: TagContext,
 
-    /// Raw span or rendered payload.
+    /// Raw span payload.
     pub payload: ContentPayload,
 }
 
@@ -511,13 +480,17 @@ impl TaggedContent {
         date: Option<NaiveDate>,
         context: TagContext,
     ) -> Self {
+        let source: Arc<str> = Arc::from(content.clone());
         Self {
             tags,
-            payload: ContentPayload::Rendered(content.clone()),
             content,
             source_file,
             date,
             context,
+            payload: ContentPayload::Span {
+                span: SourceSpan::new(0, source.len()),
+                source,
+            },
         }
     }
 
@@ -529,10 +502,10 @@ impl TaggedContent {
         context: TagContext,
     ) -> Self {
         let content = match &payload {
-            ContentPayload::Span { span, source } => {
-                span.slice(source).unwrap_or_default().to_string()
-            }
-            ContentPayload::Rendered(rendered) => rendered.clone(),
+            ContentPayload::Span { span, source } => span
+                .slice(source)
+                .expect("span payload must be valid UTF-8 range")
+                .to_string(),
         };
 
         Self {
@@ -547,18 +520,14 @@ impl TaggedContent {
 
     pub(crate) fn raw_payload_content(&self) -> &str {
         match &self.payload {
-            ContentPayload::Span { span, source } => span.slice(source).unwrap_or(&self.content),
-            ContentPayload::Rendered(rendered) => rendered.as_str(),
+            ContentPayload::Span { span, source } => span
+                .slice(source)
+                .expect("span payload must remain a valid range"),
         }
     }
 
     pub(crate) fn rendered_content_for_output(&self, output_file: Option<&Path>) -> String {
-        match &self.payload {
-            ContentPayload::Span { .. } => {
-                rewrite_markdown_targets(self.raw_payload_content(), &self.source_file, output_file)
-            }
-            ContentPayload::Rendered(rendered) => rendered.clone(),
-        }
+        rewrite_markdown_targets(self.raw_payload_content(), &self.source_file, output_file)
     }
 
     pub(crate) fn span_gap_to<'a>(&'a self, next: &'a TaggedContent) -> Option<&'a str> {
@@ -566,31 +535,28 @@ impl TaggedContent {
             return None;
         }
 
-        match (&self.payload, &next.payload) {
-            (
-                ContentPayload::Span {
-                    span: current_span,
-                    source: current_source,
-                },
-                ContentPayload::Span {
-                    span: next_span,
-                    source: next_source,
-                },
-            ) => {
-                if current_span.end > next_span.start {
-                    return None;
-                }
-                if !Arc::ptr_eq(current_source, next_source) && current_source != next_source {
-                    return None;
-                }
-                let gap = current_source.get(current_span.end..next_span.start)?;
-                if gap.chars().all(char::is_whitespace) {
-                    Some(gap)
-                } else {
-                    None
-                }
-            }
-            _ => None,
+        let (
+            ContentPayload::Span {
+                span: current_span,
+                source: current_source,
+            },
+            ContentPayload::Span {
+                span: next_span,
+                source: next_source,
+            },
+        ) = (&self.payload, &next.payload);
+
+        if current_span.end > next_span.start {
+            return None;
+        }
+        if !Arc::ptr_eq(current_source, next_source) && current_source != next_source {
+            return None;
+        }
+        let gap = current_source.get(current_span.end..next_span.start)?;
+        if gap.chars().all(char::is_whitespace) {
+            Some(gap)
+        } else {
+            None
         }
     }
 
@@ -599,17 +565,13 @@ impl TaggedContent {
         new_end: usize,
         output_file: Option<&Path>,
     ) -> bool {
-        let updated = match &mut self.payload {
-            ContentPayload::Span { span, source } => {
-                let clamped_end = new_end.min(source.len());
-                if clamped_end <= span.end {
-                    false
-                } else {
-                    span.end = clamped_end;
-                    true
-                }
-            }
-            ContentPayload::Rendered(_) => false,
+        let ContentPayload::Span { span, source } = &mut self.payload;
+        let clamped_end = new_end.min(source.len());
+        let updated = if clamped_end <= span.end {
+            false
+        } else {
+            span.end = clamped_end;
+            true
         };
 
         if updated {
@@ -788,7 +750,7 @@ impl TagParser {
                     let item_text = item_stack.pop().unwrap_or_default();
                     let item_span = item_span_stack
                         .pop()
-                        .unwrap_or_else(|| SourceSpan::new(0, 0))
+                        .expect("list item span stack must stay aligned")
                         .trim_line_breaks(content);
                     let mut item_tags = item_tag_stack.pop().unwrap_or_default();
                     let child_items = item_children_stack.pop().unwrap_or_default();
@@ -811,17 +773,17 @@ impl TagParser {
                     };
 
                     let content_clean = strip_tags(&item_text);
-                    let content_raw = item_text.trim().to_string();
                     let current_item = if !content_clean.trim().is_empty() && should_emit {
-                        let fallback = format_list_item_markdown(&content_raw, depth);
-                        let payload = match item_span.slice(content) {
-                            Some(span_text) if !span_text.trim().is_empty() => {
-                                ContentPayload::Span {
-                                    span: item_span,
-                                    source: Arc::clone(&source_arc),
-                                }
-                            }
-                            _ => ContentPayload::Rendered(fallback),
+                        let span_text = item_span
+                            .slice(content)
+                            .expect("list item span must be valid");
+                        assert!(
+                            !span_text.trim().is_empty(),
+                            "list item span must not be empty when content is emitted"
+                        );
+                        let payload = ContentPayload::Span {
+                            span: item_span,
+                            source: Arc::clone(&source_arc),
                         };
                         let mut item = TaggedContent::with_payload(
                             all_tags,
@@ -832,9 +794,7 @@ impl TagParser {
                                 .current_context()
                                 .unwrap_or(TagContext::Paragraph),
                         );
-                        if matches!(item.payload, ContentPayload::Span { .. }) {
-                            item.content = item.rendered_content_for_output(output_file);
-                        }
+                        item.content = item.rendered_content_for_output(output_file);
                         Some(item)
                     } else {
                         None
@@ -869,15 +829,10 @@ impl TagParser {
                     // Extract tags from heading
                     let heading_tags = extract_tags(&current_heading_text);
                     let heading_clean = strip_tags(&current_heading_text);
-                    let section_body =
-                        section_bodies
-                            .get(heading_index)
-                            .cloned()
-                            .unwrap_or(SectionBody {
-                                start: 0,
-                                end: 0,
-                                text: String::new(),
-                            });
+                    let section_body = section_bodies
+                        .get(heading_index)
+                        .cloned()
+                        .expect("heading spans and section body extraction must stay aligned");
                     heading_index += 1;
 
                     // Update section stack
@@ -890,14 +845,16 @@ impl TagParser {
                     // For tagged headings, compile the full section body verbatim.
                     if !heading_tags.is_empty() && !section_body.text.trim().is_empty() {
                         let section_span = SourceSpan::new(section_body.start, section_body.end);
-                        let payload = match section_span.slice(content) {
-                            Some(span_text) if !span_text.trim().is_empty() => {
-                                ContentPayload::Span {
-                                    span: section_span,
-                                    source: Arc::clone(&source_arc),
-                                }
-                            }
-                            _ => ContentPayload::Rendered(section_body.text.clone()),
+                        let span_text = section_span
+                            .slice(content)
+                            .expect("section span must be valid");
+                        assert!(
+                            !span_text.trim().is_empty(),
+                            "section span must not be empty when emitted"
+                        );
+                        let payload = ContentPayload::Span {
+                            span: section_span,
+                            source: Arc::clone(&source_arc),
                         };
                         let mut tagged = TaggedContent::with_payload(
                             section_stack.current_tags(),
@@ -909,9 +866,7 @@ impl TagParser {
                                 level: current_heading_level,
                             },
                         );
-                        if matches!(tagged.payload, ContentPayload::Span { .. }) {
-                            tagged.content = tagged.rendered_content_for_output(output_file);
-                        }
+                        tagged.content = tagged.rendered_content_for_output(output_file);
                         results.push(tagged);
                     }
                 }
@@ -928,7 +883,7 @@ impl TagParser {
                     in_paragraph = false;
                     let paragraph_span = current_paragraph_span
                         .take()
-                        .unwrap_or_else(|| SourceSpan::new(0, 0))
+                        .expect("paragraph span must be present at paragraph end")
                         .trim_line_breaks(content);
 
                     // Extract paragraph-level tags (at end of paragraph)
@@ -970,14 +925,16 @@ impl TagParser {
                         };
 
                         if !content_clean.trim().is_empty() && should_emit {
-                            let payload = match paragraph_span.slice(content) {
-                                Some(span_text) if !span_text.trim().is_empty() => {
-                                    ContentPayload::Span {
-                                        span: paragraph_span,
-                                        source: Arc::clone(&source_arc),
-                                    }
-                                }
-                                _ => ContentPayload::Rendered(content_raw),
+                            let span_text = paragraph_span
+                                .slice(content)
+                                .expect("paragraph span must be valid");
+                            assert!(
+                                !span_text.trim().is_empty(),
+                                "paragraph span must not be empty when emitted"
+                            );
+                            let payload = ContentPayload::Span {
+                                span: paragraph_span,
+                                source: Arc::clone(&source_arc),
                             };
                             let mut paragraph = TaggedContent::with_payload(
                                 all_tags,
@@ -988,10 +945,7 @@ impl TagParser {
                                     .current_context()
                                     .unwrap_or(TagContext::Paragraph),
                             );
-                            if matches!(paragraph.payload, ContentPayload::Span { .. }) {
-                                paragraph.content =
-                                    paragraph.rendered_content_for_output(output_file);
-                            }
+                            paragraph.content = paragraph.rendered_content_for_output(output_file);
                             results.push(paragraph);
                             pending_code_block_target = Some(results.len() - 1);
                         }
@@ -1123,7 +1077,6 @@ impl TagParser {
                         extend_unique(&mut all_tags, local_tags.clone());
 
                         let content_clean = strip_tags(&rewritten_html);
-                        let content_raw = rewritten_html.trim().to_string();
                         let should_emit = if inside_explicit_section {
                             !local_tags.is_empty()
                         } else {
@@ -1133,14 +1086,15 @@ impl TagParser {
                         if !content_clean.trim().is_empty() && should_emit {
                             let html_span =
                                 SourceSpan::new(range.start, range.end).trim_line_breaks(content);
-                            let payload = match html_span.slice(content) {
-                                Some(span_text) if !span_text.trim().is_empty() => {
-                                    ContentPayload::Span {
-                                        span: html_span,
-                                        source: Arc::clone(&source_arc),
-                                    }
-                                }
-                                _ => ContentPayload::Rendered(content_raw),
+                            let span_text =
+                                html_span.slice(content).expect("html span must be valid");
+                            assert!(
+                                !span_text.trim().is_empty(),
+                                "html span must not be empty when emitted"
+                            );
+                            let payload = ContentPayload::Span {
+                                span: html_span,
+                                source: Arc::clone(&source_arc),
                             };
                             let mut html_item = TaggedContent::with_payload(
                                 all_tags,
@@ -1151,10 +1105,7 @@ impl TagParser {
                                     .current_context()
                                     .unwrap_or(TagContext::Paragraph),
                             );
-                            if matches!(html_item.payload, ContentPayload::Span { .. }) {
-                                html_item.content =
-                                    html_item.rendered_content_for_output(output_file);
-                            }
+                            html_item.content = html_item.rendered_content_for_output(output_file);
                             results.push(html_item);
                         }
                     }
@@ -1174,7 +1125,7 @@ impl TagParser {
                     in_code_block = false;
                     let code_block_span = current_code_block_span
                         .take()
-                        .unwrap_or_else(|| SourceSpan::new(0, 0));
+                        .expect("code block span must be present at code block end");
 
                     let mut fenced = String::new();
                     fenced.push_str("```");
@@ -1194,19 +1145,10 @@ impl TagParser {
                         }
                         item_text.push_str(&fenced);
                     } else if let Some(idx) = pending_code_block_target {
-                        if !results[idx].try_extend_span_end(code_block_span.end, output_file) {
-                            if !results[idx].content.trim().is_empty() {
-                                results[idx].content.push_str("\n\n");
-                            }
-                            results[idx].content.push_str(&fenced);
-
-                            if let ContentPayload::Rendered(rendered) = &mut results[idx].payload {
-                                if !rendered.trim().is_empty() {
-                                    rendered.push_str("\n\n");
-                                }
-                                rendered.push_str(&fenced);
-                            }
-                        }
+                        assert!(
+                            results[idx].try_extend_span_end(code_block_span.end, output_file),
+                            "tagged paragraph + code block must remain span-extendable"
+                        );
                     } else {
                         let list_tags = list_tag_stack.last().cloned().unwrap_or_default();
                         let local_tags = list_tags.clone();
@@ -1222,14 +1164,16 @@ impl TagParser {
                         };
 
                         if should_emit {
-                            let payload = match code_block_span.slice(content) {
-                                Some(span_text) if !span_text.trim().is_empty() => {
-                                    ContentPayload::Span {
-                                        span: code_block_span,
-                                        source: Arc::clone(&source_arc),
-                                    }
-                                }
-                                _ => ContentPayload::Rendered(fenced),
+                            let span_text = code_block_span
+                                .slice(content)
+                                .expect("code block span must be valid");
+                            assert!(
+                                !span_text.trim().is_empty(),
+                                "code block span must not be empty when emitted"
+                            );
+                            let payload = ContentPayload::Span {
+                                span: code_block_span,
+                                source: Arc::clone(&source_arc),
                             };
                             let mut code_block = TaggedContent::with_payload(
                                 all_tags,
@@ -1240,10 +1184,8 @@ impl TagParser {
                                     .current_context()
                                     .unwrap_or(TagContext::Paragraph),
                             );
-                            if matches!(code_block.payload, ContentPayload::Span { .. }) {
-                                code_block.content =
-                                    code_block.rendered_content_for_output(output_file);
-                            }
+                            code_block.content =
+                                code_block.rendered_content_for_output(output_file);
                             results.push(code_block);
                         }
                     }
@@ -1762,15 +1704,11 @@ Some content under the heading.
         let results = TagParser::extract_from_markdown(markdown, Path::new("test.md"), None);
 
         assert_eq!(results.len(), 1);
-        match &results[0].payload {
-            ContentPayload::Span { span, source } => {
-                assert_eq!(
-                    span.slice(source).unwrap_or_default(),
-                    "Paragraph with [Link](./docs/design.md). #work"
-                );
-            }
-            ContentPayload::Rendered(_) => panic!("expected span payload"),
-        }
+        let ContentPayload::Span { span, source } = &results[0].payload;
+        assert_eq!(
+            span.slice(source).unwrap_or_default(),
+            "Paragraph with [Link](./docs/design.md). #work"
+        );
     }
 
     #[test]
