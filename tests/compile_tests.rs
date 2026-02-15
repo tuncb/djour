@@ -414,7 +414,13 @@ fn test_compile_rewrites_relative_links_and_images_for_output_folder() {
 
 ![Diagram](./images/diagram.png) #work
 
-See [External](https://example.com). #work",
+See [External](https://example.com). #work
+
+## Reference Block #work
+
+[Specs][specs]
+
+[specs]: ./docs/specs.md",
     );
 
     djour_cmd()
@@ -429,6 +435,7 @@ See [External](https://example.com). #work",
     assert!(content.contains("[Design Doc](../docs/design.md)"));
     assert!(content.contains("![Diagram](../images/diagram.png) #work"));
     assert!(content.contains("[External](https://example.com)"));
+    assert!(content.contains("[specs]: ../docs/specs.md"));
 }
 
 #[test]
@@ -571,6 +578,7 @@ Code sample below. #work
 fn hello() {
     println!("hello");
 }
+![Diagram](./images/diagram.png)
 ```
 "#,
     );
@@ -588,6 +596,8 @@ fn hello() {
     assert!(content.contains("Code sample below. #work"));
     assert!(content.contains("```rust"));
     assert!(content.contains("fn hello()"));
+    assert!(content.contains("![Diagram](./images/diagram.png)"));
+    assert!(!content.contains("![Diagram](../images/diagram.png)"));
     assert!(content.contains("```"));
 }
 
@@ -750,6 +760,33 @@ Intro with **bold** and `code`.
     assert!(content.contains("> quoted line"));
     assert!(content.contains("1. first\n2. second"));
     assert!(content.contains("- bullet\n  - nested"));
+}
+
+#[test]
+fn test_compile_rebases_image_path_inside_tagged_section() {
+    let temp = TempDir::new().unwrap();
+    init_journal(&temp);
+
+    create_note(
+        &temp,
+        "2025-01-15.md",
+        r#"### #section
+
+![Section Diagram](./images/section-diagram.png)
+"#,
+    );
+
+    djour_cmd()
+        .current_dir(temp.path())
+        .arg("compile")
+        .arg("section")
+        .assert()
+        .success();
+
+    let output = temp.path().join(".compilations/section.md");
+    let content = fs::read_to_string(output).unwrap();
+    assert!(content.contains("![Section Diagram](../images/section-diagram.png)"));
+    assert!(!content.contains("![Section Diagram](./images/section-diagram.png)"));
 }
 
 #[test]

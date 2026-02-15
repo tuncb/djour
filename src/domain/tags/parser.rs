@@ -33,6 +33,16 @@ fn markdown_link_or_image_regex() -> &'static Regex {
     })
 }
 
+fn markdown_reference_definition_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| {
+        Regex::new(
+            r#"(?m)^(?P<prefix>[ \t]{0,3}\[[^\]\n]+\]:[ \t]*)(?P<dest><[^>\n]+>|\S+)(?P<suffix>[^\n]*)$"#,
+        )
+        .unwrap()
+    })
+}
+
 /// Extract all tags from a string (case-insensitive, normalized to lowercase)
 fn extract_tags(text: &str) -> Vec<String> {
     tag_regex()
@@ -216,37 +226,102 @@ fn rewrite_html_targets(html: &str, source_file: &Path, output_file: Option<&Pat
         .to_string()
 }
 
+fn rewrite_outside_fenced_code_blocks<F>(markdown: &str, mut rewrite_chunk: F) -> String
+where
+    F: FnMut(&str) -> String,
+{
+    let mut rewritten = String::new();
+    let mut pending_chunk = String::new();
+    let mut active_fence: Option<(char, usize)> = None;
+
+    for line in markdown.split_inclusive('\n') {
+        if let Some((fence_char, min_len)) = active_fence {
+            rewritten.push_str(line);
+            if let Some((marker_char, marker_len)) = parse_fence_marker(line) {
+                if marker_char == fence_char && marker_len >= min_len {
+                    active_fence = None;
+                }
+            }
+            continue;
+        }
+
+        if let Some((fence_char, marker_len)) = parse_fence_marker(line) {
+            if !pending_chunk.is_empty() {
+                rewritten.push_str(&rewrite_chunk(&pending_chunk));
+                pending_chunk.clear();
+            }
+            rewritten.push_str(line);
+            active_fence = Some((fence_char, marker_len));
+            continue;
+        }
+
+        pending_chunk.push_str(line);
+    }
+
+    if !pending_chunk.is_empty() {
+        rewritten.push_str(&rewrite_chunk(&pending_chunk));
+    }
+
+    rewritten
+}
+
 pub(crate) fn rewrite_markdown_targets(
     markdown: &str,
     source_file: &Path,
     output_file: Option<&Path>,
 ) -> String {
-    let rewritten_links = markdown_link_or_image_regex()
-        .replace_all(markdown, |caps: &regex::Captures<'_>| {
-            let prefix = &caps["prefix"];
-            let destination_raw = &caps["dest"];
-            let title = caps.name("title").map_or("", |m| m.as_str());
-            let suffix = &caps["suffix"];
+    rewrite_outside_fenced_code_blocks(markdown, |chunk| {
+        let rewritten_links = markdown_link_or_image_regex()
+            .replace_all(chunk, |caps: &regex::Captures<'_>| {
+                let prefix = &caps["prefix"];
+                let destination_raw = &caps["dest"];
+                let title = caps.name("title").map_or("", |m| m.as_str());
+                let suffix = &caps["suffix"];
 
-            let (destination_inner, wrapped_in_angle) =
-                if destination_raw.starts_with('<') && destination_raw.ends_with('>') {
-                    (&destination_raw[1..destination_raw.len() - 1], true)
+                let (destination_inner, wrapped_in_angle) =
+                    if destination_raw.starts_with('<') && destination_raw.ends_with('>') {
+                        (&destination_raw[1..destination_raw.len() - 1], true)
+                    } else {
+                        (destination_raw, false)
+                    };
+
+                let rewritten = rewrite_link_target(destination_inner, source_file, output_file);
+                let rewritten_destination = if wrapped_in_angle {
+                    format!("<{}>", rewritten)
                 } else {
-                    (destination_raw, false)
+                    rewritten
                 };
 
-            let rewritten = rewrite_link_target(destination_inner, source_file, output_file);
-            let rewritten_destination = if wrapped_in_angle {
-                format!("<{}>", rewritten)
-            } else {
-                rewritten
-            };
+                format!("{prefix}{rewritten_destination}{title}{suffix}")
+            })
+            .to_string();
 
-            format!("{prefix}{rewritten_destination}{title}{suffix}")
-        })
-        .to_string();
+        let rewritten_reference_definitions = markdown_reference_definition_regex()
+            .replace_all(&rewritten_links, |caps: &regex::Captures<'_>| {
+                let prefix = &caps["prefix"];
+                let destination_raw = &caps["dest"];
+                let suffix = &caps["suffix"];
 
-    rewrite_html_targets(&rewritten_links, source_file, output_file)
+                let (destination_inner, wrapped_in_angle) =
+                    if destination_raw.starts_with('<') && destination_raw.ends_with('>') {
+                        (&destination_raw[1..destination_raw.len() - 1], true)
+                    } else {
+                        (destination_raw, false)
+                    };
+
+                let rewritten = rewrite_link_target(destination_inner, source_file, output_file);
+                let rewritten_destination = if wrapped_in_angle {
+                    format!("<{}>", rewritten)
+                } else {
+                    rewritten
+                };
+
+                format!("{prefix}{rewritten_destination}{suffix}")
+            })
+            .to_string();
+
+        rewrite_html_targets(&rewritten_reference_definitions, source_file, output_file)
+    })
 }
 
 fn link_or_image_tail(destination: &str, title: &str) -> String {
@@ -1525,6 +1600,44 @@ See [Design Doc](./docs/design.md). #work
 
         assert!(combined.contains("[Design Doc](../docs/design.md)"));
         assert!(combined.contains("![Diagram](../images/diagram.png)"));
+    }
+
+    #[test]
+    fn test_reference_link_definition_rewritten_for_output_file() {
+        let temp = TempDir::new().unwrap();
+        let source = temp.path().join("2025-01-15.md");
+        let output = temp.path().join(".compilations").join("work.md");
+        let markdown = r#"
+[Design Doc][design] #work
+
+[design]: ./docs/design.md
+[site]: https://example.com/docs
+"#;
+
+        let rewritten = rewrite_markdown_targets(markdown, &source, Some(&output));
+
+        assert!(rewritten.contains("[design]: ../docs/design.md"));
+        assert!(rewritten.contains("[site]: https://example.com/docs"));
+    }
+
+    #[test]
+    fn test_fenced_code_block_links_not_rewritten_for_output_file() {
+        let temp = TempDir::new().unwrap();
+        let source = temp.path().join("2025-01-15.md");
+        let output = temp.path().join(".compilations").join("work.md");
+        let markdown = r#"
+See [Design Doc](./docs/design.md). #work
+
+```md
+![Diagram](./images/diagram.png)
+```
+"#;
+
+        let rewritten = rewrite_markdown_targets(markdown, &source, Some(&output));
+
+        assert!(rewritten.contains("[Design Doc](../docs/design.md)"));
+        assert!(rewritten.contains("![Diagram](./images/diagram.png)"));
+        assert!(!rewritten.contains("![Diagram](../images/diagram.png)"));
     }
 
     #[test]
