@@ -132,12 +132,13 @@ impl CompileTagsService {
             _ => CompilationDateStyle::SingleDate,
         };
 
-        let markdown = TagCompiler::to_markdown(
+        let markdown = TagCompiler::to_markdown_for_output(
             filtered,
             &query,
             options.format,
             date_style,
             options.include_context,
+            Some(&output_path),
         );
 
         // 8. Write output file

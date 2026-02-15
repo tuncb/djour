@@ -6,6 +6,7 @@
 use super::{TagContext, TagQuery, TaggedContent};
 use chrono::{Datelike, Duration, NaiveDate};
 use std::collections::HashMap;
+use std::path::Path;
 
 /// Format for compiled output
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,13 +41,13 @@ impl TagCompiler {
     /// use std::path::PathBuf;
     ///
     /// let content = vec![
-    ///     TaggedContent {
-    ///         tags: vec!["work".to_string(), "urgent".to_string()],
-    ///         content: "Important meeting".to_string(),
-    ///         source_file: PathBuf::from("2025-01-15.md"),
-    ///         date: None,
-    ///         context: TagContext::Paragraph,
-    ///     },
+    ///     TaggedContent::new(
+    ///         vec!["work".to_string(), "urgent".to_string()],
+    ///         "Important meeting".to_string(),
+    ///         PathBuf::from("2025-01-15.md"),
+    ///         None,
+    ///         TagContext::Paragraph,
+    ///     ),
     /// ];
     ///
     /// let query = TagQuery::parse("work").unwrap();
@@ -86,13 +87,14 @@ impl TagCompiler {
             return false;
         }
 
-        let candidate_content = candidate.content.as_str();
+        let candidate_content = candidate.raw_payload_content();
         if candidate_content.trim().is_empty() {
             return false;
         }
 
-        container.content.len() > candidate_content.len()
-            && container.content.contains(candidate_content)
+        let container_content = container.raw_payload_content();
+        container_content.len() > candidate_content.len()
+            && container_content.contains(candidate_content)
     }
 
     /// Sort content chronologically (by date, then by source file)
@@ -151,16 +153,16 @@ impl TagCompiler {
     /// use chrono::NaiveDate;
     ///
     /// let content = vec![
-    ///     TaggedContent {
-    ///         tags: vec!["work".to_string()],
-    ///         content: "Meeting notes".to_string(),
-    ///         source_file: PathBuf::from("2025-01-15.md"),
-    ///         date: NaiveDate::from_ymd_opt(2025, 1, 15),
-    ///         context: TagContext::Section {
+    ///     TaggedContent::new(
+    ///         vec!["work".to_string()],
+    ///         "Meeting notes".to_string(),
+    ///         PathBuf::from("2025-01-15.md"),
+    ///         NaiveDate::from_ymd_opt(2025, 1, 15),
+    ///         TagContext::Section {
     ///             heading: "Work Notes".to_string(),
     ///             level: 1,
     ///         },
-    ///     },
+    ///     ),
     /// ];
     ///
     /// let query = TagQuery::parse("work").unwrap();
@@ -181,6 +183,18 @@ impl TagCompiler {
         date_style: CompilationDateStyle,
         include_context: bool,
     ) -> String {
+        Self::to_markdown_for_output(content, query, format, date_style, include_context, None)
+    }
+
+    /// Generate markdown output for compiled content with optional output path context.
+    pub fn to_markdown_for_output(
+        content: Vec<TaggedContent>,
+        query: &TagQuery,
+        format: CompilationFormat,
+        date_style: CompilationDateStyle,
+        include_context: bool,
+        output_file: Option<&Path>,
+    ) -> String {
         let mut output = String::new();
 
         // Header
@@ -193,10 +207,22 @@ impl TagCompiler {
 
         match format {
             CompilationFormat::Chronological => {
-                Self::markdown_chronological(content, date_style, include_context, &mut output);
+                Self::markdown_chronological(
+                    content,
+                    date_style,
+                    include_context,
+                    output_file,
+                    &mut output,
+                );
             }
             CompilationFormat::Grouped => {
-                Self::markdown_grouped(content, date_style, include_context, &mut output);
+                Self::markdown_grouped(
+                    content,
+                    date_style,
+                    include_context,
+                    output_file,
+                    &mut output,
+                );
             }
         }
 
@@ -212,6 +238,7 @@ impl TagCompiler {
         content: Vec<TaggedContent>,
         date_style: CompilationDateStyle,
         include_context: bool,
+        output_file: Option<&Path>,
         output: &mut String,
     ) {
         let sorted = Self::sort_chronological(content);
@@ -242,8 +269,9 @@ impl TagCompiler {
             }
 
             // Content
-            output.push_str(&tc.content);
-            output.push_str(Self::content_separator(&sorted, idx));
+            let rendered_content = tc.rendered_content_for_output(output_file);
+            output.push_str(&rendered_content);
+            output.push_str(&Self::content_separator(&sorted, idx));
         }
     }
 
@@ -252,6 +280,7 @@ impl TagCompiler {
         content: Vec<TaggedContent>,
         date_style: CompilationDateStyle,
         include_context: bool,
+        output_file: Option<&Path>,
         output: &mut String,
     ) {
         let groups = Self::group_by_file(content);
@@ -280,21 +309,26 @@ impl TagCompiler {
                 }
 
                 // Content
-                output.push_str(&tc.content);
-                output.push_str(Self::content_separator(&items, idx));
+                let rendered_content = tc.rendered_content_for_output(output_file);
+                output.push_str(&rendered_content);
+                output.push_str(&Self::content_separator(&items, idx));
             }
         }
     }
 
-    fn content_separator(items: &[TaggedContent], idx: usize) -> &'static str {
+    fn content_separator(items: &[TaggedContent], idx: usize) -> String {
         if idx + 1 >= items.len() {
-            return "\n\n";
+            return "\n\n".to_string();
+        }
+
+        if let Some(gap) = items[idx].span_gap_to(&items[idx + 1]) {
+            return gap.to_string();
         }
 
         if Self::should_keep_tight_spacing(&items[idx], &items[idx + 1]) {
-            "\n"
+            "\n".to_string()
         } else {
-            "\n\n"
+            "\n\n".to_string()
         }
     }
 
@@ -303,8 +337,8 @@ impl TagCompiler {
             && current.date == next.date
             && matches!(current.context, TagContext::Paragraph)
             && matches!(next.context, TagContext::Paragraph)
-            && Self::looks_like_list_item(&current.content)
-            && Self::looks_like_list_item(&next.content)
+            && Self::looks_like_list_item(current.raw_payload_content())
+            && Self::looks_like_list_item(next.raw_payload_content())
     }
 
     fn looks_like_list_item(content: &str) -> bool {
@@ -366,8 +400,10 @@ impl TagCompiler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::tags::{ContentPayload, SourceSpan};
     use chrono::NaiveDate;
     use std::path::PathBuf;
+    use std::sync::Arc;
 
     fn create_test_content(
         tags: Vec<&str>,
@@ -375,13 +411,49 @@ mod tests {
         filename: &str,
         date: Option<NaiveDate>,
     ) -> TaggedContent {
-        TaggedContent {
-            tags: tags.iter().map(|s| s.to_string()).collect(),
-            content: content.to_string(),
-            source_file: PathBuf::from(filename),
+        TaggedContent::new(
+            tags.iter().map(|s| s.to_string()).collect(),
+            content.to_string(),
+            PathBuf::from(filename),
             date,
-            context: TagContext::Paragraph,
-        }
+            TagContext::Paragraph,
+        )
+    }
+
+    fn create_test_section_content(
+        tags: Vec<&str>,
+        content: &str,
+        filename: &str,
+        date: Option<NaiveDate>,
+        heading: &str,
+        level: usize,
+    ) -> TaggedContent {
+        TaggedContent::new(
+            tags.iter().map(|s| s.to_string()).collect(),
+            content.to_string(),
+            PathBuf::from(filename),
+            date,
+            TagContext::Section {
+                heading: heading.to_string(),
+                level,
+            },
+        )
+    }
+
+    fn create_test_span_content(
+        tags: Vec<&str>,
+        source: Arc<str>,
+        span: SourceSpan,
+        filename: &str,
+        date: Option<NaiveDate>,
+    ) -> TaggedContent {
+        TaggedContent::with_payload(
+            tags.iter().map(|s| s.to_string()).collect(),
+            ContentPayload::Span { span, source },
+            PathBuf::from(filename),
+            date,
+            TagContext::Paragraph,
+        )
     }
 
     #[test]
@@ -445,23 +517,15 @@ mod tests {
     #[test]
     fn test_filter_dedupes_content_contained_by_section() {
         let content = vec![
-            TaggedContent {
-                tags: vec!["work".to_string()],
-                content: "Line one.\nLine two.".to_string(),
-                source_file: PathBuf::from("a.md"),
-                date: None,
-                context: TagContext::Section {
-                    heading: "Work".to_string(),
-                    level: 2,
-                },
-            },
-            TaggedContent {
-                tags: vec!["work".to_string()],
-                content: "Line one.".to_string(),
-                source_file: PathBuf::from("a.md"),
-                date: None,
-                context: TagContext::Paragraph,
-            },
+            create_test_section_content(
+                vec!["work"],
+                "Line one.\nLine two.",
+                "a.md",
+                None,
+                "Work",
+                2,
+            ),
+            create_test_content(vec!["work"], "Line one.", "a.md", None),
         ];
 
         let query = TagQuery::parse("work").unwrap();
@@ -474,23 +538,15 @@ mod tests {
     #[test]
     fn test_filter_keeps_specific_match_when_section_does_not_match() {
         let content = vec![
-            TaggedContent {
-                tags: vec!["work".to_string()],
-                content: "Line one.\nLine two.".to_string(),
-                source_file: PathBuf::from("a.md"),
-                date: None,
-                context: TagContext::Section {
-                    heading: "Work".to_string(),
-                    level: 2,
-                },
-            },
-            TaggedContent {
-                tags: vec!["work".to_string(), "note".to_string()],
-                content: "Line one.".to_string(),
-                source_file: PathBuf::from("a.md"),
-                date: None,
-                context: TagContext::Paragraph,
-            },
+            create_test_section_content(
+                vec!["work"],
+                "Line one.\nLine two.",
+                "a.md",
+                None,
+                "Work",
+                2,
+            ),
+            create_test_content(vec!["work", "note"], "Line one.", "a.md", None),
         ];
 
         let query = TagQuery::parse("work AND note").unwrap();
@@ -675,16 +731,14 @@ mod tests {
 
     #[test]
     fn test_to_markdown_with_context() {
-        let content = vec![TaggedContent {
-            tags: vec!["work".to_string()],
-            content: "Meeting notes".to_string(),
-            source_file: PathBuf::from("2025-01-15.md"),
-            date: NaiveDate::from_ymd_opt(2025, 1, 15),
-            context: TagContext::Section {
-                heading: "Work Notes".to_string(),
-                level: 1,
-            },
-        }];
+        let content = vec![create_test_section_content(
+            vec!["work"],
+            "Meeting notes",
+            "2025-01-15.md",
+            NaiveDate::from_ymd_opt(2025, 1, 15),
+            "Work Notes",
+            1,
+        )];
 
         let query = TagQuery::parse("work").unwrap();
         let markdown = TagCompiler::to_markdown(
@@ -794,5 +848,98 @@ mod tests {
         );
 
         assert!(markdown.contains("first paragraph\n\nsecond paragraph"));
+    }
+
+    #[test]
+    fn test_to_markdown_keeps_source_gap_for_adjacent_spans() {
+        let date = NaiveDate::from_ymd_opt(2025, 1, 15);
+        let source: Arc<str> = Arc::from("* first\n* second");
+        let second_start = source.find("* second").unwrap();
+        let content = vec![
+            create_test_span_content(
+                vec!["work"],
+                Arc::clone(&source),
+                SourceSpan::new(0, "* first".len()),
+                "2025-01-15.md",
+                date,
+            ),
+            create_test_span_content(
+                vec!["work"],
+                Arc::clone(&source),
+                SourceSpan::new(second_start, second_start + "* second".len()),
+                "2025-01-15.md",
+                date,
+            ),
+        ];
+
+        let query = TagQuery::parse("work").unwrap();
+        let markdown = TagCompiler::to_markdown(
+            content,
+            &query,
+            CompilationFormat::Chronological,
+            CompilationDateStyle::SingleDate,
+            false,
+        );
+
+        assert!(markdown.contains("* first\n* second"));
+        assert!(!markdown.contains("* first\n\n* second"));
+    }
+
+    #[test]
+    fn test_to_markdown_supports_mixed_span_and_rendered_payloads() {
+        let date = NaiveDate::from_ymd_opt(2025, 1, 15);
+        let source: Arc<str> = Arc::from("from span #work");
+        let content = vec![
+            create_test_span_content(
+                vec!["work"],
+                source,
+                SourceSpan::new(0, "from span #work".len()),
+                "2025-01-15.md",
+                date,
+            ),
+            create_test_content(vec!["work"], "from rendered #work", "2025-01-15.md", date),
+        ];
+
+        let query = TagQuery::parse("work").unwrap();
+        let markdown = TagCompiler::to_markdown(
+            content,
+            &query,
+            CompilationFormat::Chronological,
+            CompilationDateStyle::SingleDate,
+            false,
+        );
+
+        assert!(markdown.contains("from span #work"));
+        assert!(markdown.contains("from rendered #work"));
+    }
+
+    #[test]
+    fn test_to_markdown_for_output_rewrites_span_links() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let source_file = temp.path().join("2025-01-15.md");
+        let output_file = temp.path().join(".compilations").join("work.md");
+        let source_text: Arc<str> = Arc::from("See [Doc](./docs/design.md). #work");
+        let content = vec![TaggedContent::with_payload(
+            vec!["work".to_string()],
+            ContentPayload::Span {
+                span: SourceSpan::new(0, source_text.len()),
+                source: source_text,
+            },
+            source_file,
+            NaiveDate::from_ymd_opt(2025, 1, 15),
+            TagContext::Paragraph,
+        )];
+
+        let query = TagQuery::parse("work").unwrap();
+        let markdown = TagCompiler::to_markdown_for_output(
+            content,
+            &query,
+            CompilationFormat::Chronological,
+            CompilationDateStyle::SingleDate,
+            false,
+            Some(&output_file),
+        );
+
+        assert!(markdown.contains("[Doc](../docs/design.md)"));
     }
 }

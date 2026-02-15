@@ -5,7 +5,7 @@ use pulldown_cmark::{CodeBlockKind, Event, Parser as MdParser, Tag, TagEnd};
 use regex::Regex;
 use std::ffi::{OsStr, OsString};
 use std::path::{Component, Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 /// Regex for matching hashtags: #word, #word-with-dashes, #word_with_underscores
 fn tag_regex() -> &'static Regex {
@@ -21,6 +21,16 @@ fn html_attr_double_quote_regex() -> &'static Regex {
 fn html_attr_single_quote_regex() -> &'static Regex {
     static REGEX: OnceLock<Regex> = OnceLock::new();
     REGEX.get_or_init(|| Regex::new(r#"(?i)\b(src|href)\s*=\s*'([^']+)'"#).unwrap())
+}
+
+fn markdown_link_or_image_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| {
+        Regex::new(
+            r#"(?P<prefix>!?\[[^\]\n]*\]\()(?P<dest><[^>\n]+>|[^)\s]+)(?P<title>\s+"[^"\n]*")?(?P<suffix>\))"#,
+        )
+        .unwrap()
+    })
 }
 
 /// Extract all tags from a string (case-insensitive, normalized to lowercase)
@@ -206,6 +216,39 @@ fn rewrite_html_targets(html: &str, source_file: &Path, output_file: Option<&Pat
         .to_string()
 }
 
+pub(crate) fn rewrite_markdown_targets(
+    markdown: &str,
+    source_file: &Path,
+    output_file: Option<&Path>,
+) -> String {
+    let rewritten_links = markdown_link_or_image_regex()
+        .replace_all(markdown, |caps: &regex::Captures<'_>| {
+            let prefix = &caps["prefix"];
+            let destination_raw = &caps["dest"];
+            let title = caps.name("title").map_or("", |m| m.as_str());
+            let suffix = &caps["suffix"];
+
+            let (destination_inner, wrapped_in_angle) =
+                if destination_raw.starts_with('<') && destination_raw.ends_with('>') {
+                    (&destination_raw[1..destination_raw.len() - 1], true)
+                } else {
+                    (destination_raw, false)
+                };
+
+            let rewritten = rewrite_link_target(destination_inner, source_file, output_file);
+            let rewritten_destination = if wrapped_in_angle {
+                format!("<{}>", rewritten)
+            } else {
+                rewritten
+            };
+
+            format!("{prefix}{rewritten_destination}{title}{suffix}")
+        })
+        .to_string();
+
+    rewrite_html_targets(&rewritten_links, source_file, output_file)
+}
+
 fn link_or_image_tail(destination: &str, title: &str) -> String {
     if title.is_empty() {
         format!("]({})", destination)
@@ -245,6 +288,23 @@ fn format_list_item_markdown(item_text: &str, depth: usize) -> String {
 
 fn trim_section_body(raw: &str) -> &str {
     raw.trim_matches(|c| c == '\r' || c == '\n')
+}
+
+fn trim_line_break_span(content: &str, mut start: usize, mut end: usize) -> (usize, usize) {
+    let bytes = content.as_bytes();
+    let len = bytes.len();
+    start = start.min(len);
+    end = end.min(len);
+
+    while start < end && matches!(bytes[start], b'\r' | b'\n') {
+        start += 1;
+    }
+
+    while end > start && matches!(bytes[end - 1], b'\r' | b'\n') {
+        end -= 1;
+    }
+
+    (start, end)
 }
 
 fn parse_atx_heading_level(line: &str) -> Option<usize> {
@@ -297,6 +357,13 @@ struct HeadingSpan {
     line_end: usize,
 }
 
+#[derive(Debug, Clone)]
+struct SectionBody {
+    start: usize,
+    end: usize,
+    text: String,
+}
+
 fn collect_heading_spans(content: &str) -> Vec<HeadingSpan> {
     let mut spans = Vec::new();
     let mut offset = 0usize;
@@ -336,7 +403,7 @@ fn collect_heading_spans(content: &str) -> Vec<HeadingSpan> {
     spans
 }
 
-fn extract_section_bodies_in_order(content: &str) -> Vec<String> {
+fn extract_section_bodies_in_order(content: &str) -> Vec<SectionBody> {
     let headings = collect_heading_spans(content);
     let mut bodies = Vec::with_capacity(headings.len());
 
@@ -351,7 +418,12 @@ fn extract_section_bodies_in_order(content: &str) -> Vec<String> {
             }
         }
 
-        bodies.push(trim_section_body(&content[start..end]).to_string());
+        let (trimmed_start, trimmed_end) = trim_line_break_span(content, start, end);
+        bodies.push(SectionBody {
+            start: trimmed_start,
+            end: trimmed_end,
+            text: trim_section_body(&content[trimmed_start..trimmed_end]).to_string(),
+        });
     }
 
     bodies
@@ -375,6 +447,40 @@ pub enum TagContext {
     Paragraph,
 }
 
+/// Source byte span in markdown text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SourceSpan {
+    pub start: usize,
+    pub end: usize,
+}
+
+impl SourceSpan {
+    pub fn new(start: usize, end: usize) -> Self {
+        Self { start, end }
+    }
+
+    pub fn trim_line_breaks(self, content: &str) -> Self {
+        let (start, end) = trim_line_break_span(content, self.start, self.end);
+        Self { start, end }
+    }
+
+    pub fn slice<'a>(&self, content: &'a str) -> Option<&'a str> {
+        if self.start > self.end {
+            return None;
+        }
+        content.get(self.start..self.end)
+    }
+}
+
+/// Content payload for tagged output.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ContentPayload {
+    /// Raw byte span into source markdown.
+    Span { span: SourceSpan, source: Arc<str> },
+    /// Rendered content fallback.
+    Rendered(String),
+}
+
 /// A piece of content with associated tags
 #[derive(Debug, Clone, PartialEq)]
 pub struct TaggedContent {
@@ -392,6 +498,9 @@ pub struct TaggedContent {
 
     /// Context about where this content came from
     pub context: TagContext,
+
+    /// Raw span or rendered payload.
+    pub payload: ContentPayload,
 }
 
 impl TaggedContent {
@@ -404,11 +513,110 @@ impl TaggedContent {
     ) -> Self {
         Self {
             tags,
+            payload: ContentPayload::Rendered(content.clone()),
             content,
             source_file,
             date,
             context,
         }
+    }
+
+    pub fn with_payload(
+        tags: Vec<String>,
+        payload: ContentPayload,
+        source_file: PathBuf,
+        date: Option<NaiveDate>,
+        context: TagContext,
+    ) -> Self {
+        let content = match &payload {
+            ContentPayload::Span { span, source } => {
+                span.slice(source).unwrap_or_default().to_string()
+            }
+            ContentPayload::Rendered(rendered) => rendered.clone(),
+        };
+
+        Self {
+            tags,
+            content,
+            source_file,
+            date,
+            context,
+            payload,
+        }
+    }
+
+    pub(crate) fn raw_payload_content(&self) -> &str {
+        match &self.payload {
+            ContentPayload::Span { span, source } => span.slice(source).unwrap_or(&self.content),
+            ContentPayload::Rendered(rendered) => rendered.as_str(),
+        }
+    }
+
+    pub(crate) fn rendered_content_for_output(&self, output_file: Option<&Path>) -> String {
+        match &self.payload {
+            ContentPayload::Span { .. } => {
+                rewrite_markdown_targets(self.raw_payload_content(), &self.source_file, output_file)
+            }
+            ContentPayload::Rendered(rendered) => rendered.clone(),
+        }
+    }
+
+    pub(crate) fn span_gap_to<'a>(&'a self, next: &'a TaggedContent) -> Option<&'a str> {
+        if self.source_file != next.source_file {
+            return None;
+        }
+
+        match (&self.payload, &next.payload) {
+            (
+                ContentPayload::Span {
+                    span: current_span,
+                    source: current_source,
+                },
+                ContentPayload::Span {
+                    span: next_span,
+                    source: next_source,
+                },
+            ) => {
+                if current_span.end > next_span.start {
+                    return None;
+                }
+                if !Arc::ptr_eq(current_source, next_source) && current_source != next_source {
+                    return None;
+                }
+                let gap = current_source.get(current_span.end..next_span.start)?;
+                if gap.chars().all(char::is_whitespace) {
+                    Some(gap)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    pub(crate) fn try_extend_span_end(
+        &mut self,
+        new_end: usize,
+        output_file: Option<&Path>,
+    ) -> bool {
+        let updated = match &mut self.payload {
+            ContentPayload::Span { span, source } => {
+                let clamped_end = new_end.min(source.len());
+                if clamped_end <= span.end {
+                    false
+                } else {
+                    span.end = clamped_end;
+                    true
+                }
+            }
+            ContentPayload::Rendered(_) => false,
+        };
+
+        if updated {
+            self.content = self.rendered_content_for_output(output_file);
+        }
+
+        updated
     }
 }
 
@@ -499,12 +707,15 @@ impl TagParser {
         let mut section_stack = SectionStack::new();
         let mut list_tag_stack: Vec<Vec<String>> = Vec::new();
         let mut item_stack: Vec<String> = Vec::new();
+        let mut item_span_stack: Vec<SourceSpan> = Vec::new();
         let mut item_tag_stack: Vec<Vec<String>> = Vec::new();
         let mut item_children_stack: Vec<Vec<TaggedContent>> = Vec::new();
         let mut pending_list_tags: Option<Vec<String>> = None;
 
-        let parser = MdParser::new(content);
+        let source_arc: Arc<str> = Arc::from(content.to_string());
+        let parser = MdParser::new(content).into_offset_iter();
         let mut current_paragraph = String::new();
+        let mut current_paragraph_span: Option<SourceSpan> = None;
         let mut in_paragraph = false;
         let mut in_heading = false;
         let mut current_heading_text = String::new();
@@ -512,6 +723,7 @@ impl TagParser {
         let mut in_code_block = false;
         let mut code_block_info = String::new();
         let mut code_block_text = String::new();
+        let mut current_code_block_span: Option<SourceSpan> = None;
         let mut pending_code_block_target: Option<usize> = None;
         let mut inline_stack: Vec<InlineConstruct> = Vec::new();
         let mut heading_index = 0usize;
@@ -524,7 +736,20 @@ impl TagParser {
             }
         };
 
-        for event in parser {
+        for (event, range) in parser {
+            if let Some(span) = current_paragraph_span.as_mut() {
+                span.start = span.start.min(range.start);
+                span.end = span.end.max(range.end);
+            }
+            if let Some(span) = current_code_block_span.as_mut() {
+                span.start = span.start.min(range.start);
+                span.end = span.end.max(range.end);
+            }
+            for span in &mut item_span_stack {
+                span.start = span.start.min(range.start);
+                span.end = span.end.max(range.end);
+            }
+
             match event {
                 Event::Start(Tag::List(_)) => {
                     pending_code_block_target = None;
@@ -553,6 +778,7 @@ impl TagParser {
                 Event::Start(Tag::Item) => {
                     pending_code_block_target = None;
                     item_stack.push(String::new());
+                    item_span_stack.push(SourceSpan::new(range.start, range.end));
                     item_tag_stack.push(Vec::new());
                     item_children_stack.push(Vec::new());
                 }
@@ -560,6 +786,10 @@ impl TagParser {
                 Event::End(TagEnd::Item) => {
                     let depth = item_stack.len();
                     let item_text = item_stack.pop().unwrap_or_default();
+                    let item_span = item_span_stack
+                        .pop()
+                        .unwrap_or_else(|| SourceSpan::new(0, 0))
+                        .trim_line_breaks(content);
                     let mut item_tags = item_tag_stack.pop().unwrap_or_default();
                     let child_items = item_children_stack.pop().unwrap_or_default();
                     let text_tags = extract_tags(&item_text);
@@ -583,15 +813,29 @@ impl TagParser {
                     let content_clean = strip_tags(&item_text);
                     let content_raw = item_text.trim().to_string();
                     let current_item = if !content_clean.trim().is_empty() && should_emit {
-                        Some(TaggedContent::new(
+                        let fallback = format_list_item_markdown(&content_raw, depth);
+                        let payload = match item_span.slice(content) {
+                            Some(span_text) if !span_text.trim().is_empty() => {
+                                ContentPayload::Span {
+                                    span: item_span,
+                                    source: Arc::clone(&source_arc),
+                                }
+                            }
+                            _ => ContentPayload::Rendered(fallback),
+                        };
+                        let mut item = TaggedContent::with_payload(
                             all_tags,
-                            format_list_item_markdown(&content_raw, depth),
+                            payload,
                             source_file.to_path_buf(),
                             date,
                             section_stack
                                 .current_context()
                                 .unwrap_or(TagContext::Paragraph),
-                        ))
+                        );
+                        if matches!(item.payload, ContentPayload::Span { .. }) {
+                            item.content = item.rendered_content_for_output(output_file);
+                        }
+                        Some(item)
                     } else {
                         None
                     };
@@ -625,10 +869,15 @@ impl TagParser {
                     // Extract tags from heading
                     let heading_tags = extract_tags(&current_heading_text);
                     let heading_clean = strip_tags(&current_heading_text);
-                    let section_body = section_bodies
-                        .get(heading_index)
-                        .map(|s| s.as_str())
-                        .unwrap_or_default();
+                    let section_body =
+                        section_bodies
+                            .get(heading_index)
+                            .cloned()
+                            .unwrap_or(SectionBody {
+                                start: 0,
+                                end: 0,
+                                text: String::new(),
+                            });
                     heading_index += 1;
 
                     // Update section stack
@@ -639,17 +888,31 @@ impl TagParser {
                     );
 
                     // For tagged headings, compile the full section body verbatim.
-                    if !heading_tags.is_empty() && !section_body.trim().is_empty() {
-                        results.push(TaggedContent::new(
+                    if !heading_tags.is_empty() && !section_body.text.trim().is_empty() {
+                        let section_span = SourceSpan::new(section_body.start, section_body.end);
+                        let payload = match section_span.slice(content) {
+                            Some(span_text) if !span_text.trim().is_empty() => {
+                                ContentPayload::Span {
+                                    span: section_span,
+                                    source: Arc::clone(&source_arc),
+                                }
+                            }
+                            _ => ContentPayload::Rendered(section_body.text.clone()),
+                        };
+                        let mut tagged = TaggedContent::with_payload(
                             section_stack.current_tags(),
-                            section_body.to_string(),
+                            payload,
                             source_file.to_path_buf(),
                             date,
                             TagContext::Section {
                                 heading: heading_clean,
                                 level: current_heading_level,
                             },
-                        ));
+                        );
+                        if matches!(tagged.payload, ContentPayload::Span { .. }) {
+                            tagged.content = tagged.rendered_content_for_output(output_file);
+                        }
+                        results.push(tagged);
                     }
                 }
 
@@ -657,11 +920,16 @@ impl TagParser {
                     pending_code_block_target = None;
                     in_paragraph = true;
                     current_paragraph.clear();
+                    current_paragraph_span = Some(SourceSpan::new(range.start, range.end));
                     pending_list_tags = None;
                 }
 
                 Event::End(TagEnd::Paragraph) => {
                     in_paragraph = false;
+                    let paragraph_span = current_paragraph_span
+                        .take()
+                        .unwrap_or_else(|| SourceSpan::new(0, 0))
+                        .trim_line_breaks(content);
 
                     // Extract paragraph-level tags (at end of paragraph)
                     let para_tags = extract_tags(&current_paragraph);
@@ -702,15 +970,29 @@ impl TagParser {
                         };
 
                         if !content_clean.trim().is_empty() && should_emit {
-                            results.push(TaggedContent::new(
+                            let payload = match paragraph_span.slice(content) {
+                                Some(span_text) if !span_text.trim().is_empty() => {
+                                    ContentPayload::Span {
+                                        span: paragraph_span,
+                                        source: Arc::clone(&source_arc),
+                                    }
+                                }
+                                _ => ContentPayload::Rendered(content_raw),
+                            };
+                            let mut paragraph = TaggedContent::with_payload(
                                 all_tags,
-                                content_raw,
+                                payload,
                                 source_file.to_path_buf(),
                                 date,
                                 section_stack
                                     .current_context()
                                     .unwrap_or(TagContext::Paragraph),
-                            ));
+                            );
+                            if matches!(paragraph.payload, ContentPayload::Span { .. }) {
+                                paragraph.content =
+                                    paragraph.rendered_content_for_output(output_file);
+                            }
+                            results.push(paragraph);
                             pending_code_block_target = Some(results.len() - 1);
                         }
                         pending_list_tags = None;
@@ -849,15 +1131,31 @@ impl TagParser {
                         };
 
                         if !content_clean.trim().is_empty() && should_emit {
-                            results.push(TaggedContent::new(
+                            let html_span =
+                                SourceSpan::new(range.start, range.end).trim_line_breaks(content);
+                            let payload = match html_span.slice(content) {
+                                Some(span_text) if !span_text.trim().is_empty() => {
+                                    ContentPayload::Span {
+                                        span: html_span,
+                                        source: Arc::clone(&source_arc),
+                                    }
+                                }
+                                _ => ContentPayload::Rendered(content_raw),
+                            };
+                            let mut html_item = TaggedContent::with_payload(
                                 all_tags,
-                                content_raw,
+                                payload,
                                 source_file.to_path_buf(),
                                 date,
                                 section_stack
                                     .current_context()
                                     .unwrap_or(TagContext::Paragraph),
-                            ));
+                            );
+                            if matches!(html_item.payload, ContentPayload::Span { .. }) {
+                                html_item.content =
+                                    html_item.rendered_content_for_output(output_file);
+                            }
+                            results.push(html_item);
                         }
                     }
                 }
@@ -865,6 +1163,7 @@ impl TagParser {
                 Event::Start(Tag::CodeBlock(kind)) => {
                     in_code_block = true;
                     code_block_text.clear();
+                    current_code_block_span = Some(SourceSpan::new(range.start, range.end));
                     code_block_info = match kind {
                         CodeBlockKind::Fenced(info) => info.to_string(),
                         CodeBlockKind::Indented => String::new(),
@@ -873,6 +1172,9 @@ impl TagParser {
 
                 Event::End(TagEnd::CodeBlock) => {
                     in_code_block = false;
+                    let code_block_span = current_code_block_span
+                        .take()
+                        .unwrap_or_else(|| SourceSpan::new(0, 0));
 
                     let mut fenced = String::new();
                     fenced.push_str("```");
@@ -892,10 +1194,19 @@ impl TagParser {
                         }
                         item_text.push_str(&fenced);
                     } else if let Some(idx) = pending_code_block_target {
-                        if !results[idx].content.trim().is_empty() {
-                            results[idx].content.push_str("\n\n");
+                        if !results[idx].try_extend_span_end(code_block_span.end, output_file) {
+                            if !results[idx].content.trim().is_empty() {
+                                results[idx].content.push_str("\n\n");
+                            }
+                            results[idx].content.push_str(&fenced);
+
+                            if let ContentPayload::Rendered(rendered) = &mut results[idx].payload {
+                                if !rendered.trim().is_empty() {
+                                    rendered.push_str("\n\n");
+                                }
+                                rendered.push_str(&fenced);
+                            }
                         }
-                        results[idx].content.push_str(&fenced);
                     } else {
                         let list_tags = list_tag_stack.last().cloned().unwrap_or_default();
                         let local_tags = list_tags.clone();
@@ -911,15 +1222,29 @@ impl TagParser {
                         };
 
                         if should_emit {
-                            results.push(TaggedContent::new(
+                            let payload = match code_block_span.slice(content) {
+                                Some(span_text) if !span_text.trim().is_empty() => {
+                                    ContentPayload::Span {
+                                        span: code_block_span,
+                                        source: Arc::clone(&source_arc),
+                                    }
+                                }
+                                _ => ContentPayload::Rendered(fenced),
+                            };
+                            let mut code_block = TaggedContent::with_payload(
                                 all_tags,
-                                fenced,
+                                payload,
                                 source_file.to_path_buf(),
                                 date,
                                 section_stack
                                     .current_context()
                                     .unwrap_or(TagContext::Paragraph),
-                            ));
+                            );
+                            if matches!(code_block.payload, ContentPayload::Span { .. }) {
+                                code_block.content =
+                                    code_block.rendered_content_for_output(output_file);
+                            }
+                            results.push(code_block);
                         }
                     }
                 }
@@ -1429,5 +1754,51 @@ Some content under the heading.
             .content
             .contains("Some content under the heading."));
         assert!(!results[0].content.trim().is_empty());
+    }
+
+    #[test]
+    fn test_paragraph_emits_span_payload() {
+        let markdown = "Paragraph with [Link](./docs/design.md). #work";
+        let results = TagParser::extract_from_markdown(markdown, Path::new("test.md"), None);
+
+        assert_eq!(results.len(), 1);
+        match &results[0].payload {
+            ContentPayload::Span { span, source } => {
+                assert_eq!(
+                    span.slice(source).unwrap_or_default(),
+                    "Paragraph with [Link](./docs/design.md). #work"
+                );
+            }
+            ContentPayload::Rendered(_) => panic!("expected span payload"),
+        }
+    }
+
+    #[test]
+    fn test_list_item_span_preserves_marker_style() {
+        let markdown = "* first #work\n* second #work\n";
+        let results = TagParser::extract_from_markdown(markdown, Path::new("test.md"), None);
+
+        assert_eq!(results.len(), 2);
+        assert!(results[0].content.starts_with("* "));
+        assert!(results[1].content.starts_with("* "));
+        assert!(!results[0].content.starts_with("- "));
+        assert!(!results[1].content.starts_with("- "));
+    }
+
+    #[test]
+    fn test_tagged_paragraph_with_code_block_extends_span() {
+        let markdown = r#"Snippet title. #work
+
+```rust
+fn hi() {}
+```
+"#;
+        let results = TagParser::extract_from_markdown(markdown, Path::new("test.md"), None);
+
+        assert_eq!(results.len(), 1);
+        let raw = results[0].raw_payload_content();
+        assert!(raw.contains("Snippet title. #work"));
+        assert!(raw.contains("```rust"));
+        assert!(raw.contains("fn hi() {}"));
     }
 }
