@@ -157,6 +157,7 @@ djour list [--from <DATE>] [--to <DATE>] [--limit <N>]
 - `--from <DATE>`: start date inclusive (`DD-MM-YYYY`)
 - `--to <DATE>`: end date inclusive (`DD-MM-YYYY`)
 - `--limit <N>`: max entries to show (default: `10`)
+- `--recursive`: search notes recursively (excluding directories starting with `.`)
 
 ### `tags`
 
@@ -168,6 +169,7 @@ djour tags [--from <DATE>] [--to <DATE>]
 
 - `--from <DATE>`: start date filter (`DD-MM-YYYY`)
 - `--to <DATE>`: end date filter (`DD-MM-YYYY`)
+- `--recursive`: search notes recursively (excluding directories starting with `.`)
 
 ### `compile`
 
@@ -184,6 +186,7 @@ djour compile <QUERY> [OPTIONS]
 - `--format <FORMAT>`: `chronological|grouped` (default: `chronological`)
 - `--include-context`: include parent section headings
 - `--open`: open compiled output in editor
+- `--recursive`: search notes recursively (excluding directories starting with `.`)
 
 ### `mode`
 
@@ -198,6 +201,7 @@ djour mode <MODE> [OPTIONS]
 - `--dry-run`: show migration plan only
 - `--yes`: apply migration (required unless `--dry-run`)
 - `--archive-dir <PATH>`: archive folder relative to journal root
+- Note: `mode` migration is always non-recursive; `--recursive` is intentionally omitted.
 
 ## Configuration Keys
 

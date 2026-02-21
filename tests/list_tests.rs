@@ -364,3 +364,32 @@ fn test_list_combined_filters() {
     assert!(lines[1].contains("2025-01-17"));
     assert!(lines[2].contains("2025-01-16"));
 }
+
+#[test]
+fn test_list_recursive_includes_nested_notes_and_skips_dot_dirs() {
+    let temp = TempDir::new().unwrap();
+
+    djour_cmd().arg("init").arg(temp.path()).assert().success();
+
+    fs::write(temp.path().join("2025-01-15.md"), "root").unwrap();
+
+    let nested = temp.path().join("projects");
+    fs::create_dir_all(&nested).unwrap();
+    fs::write(nested.join("2025-01-16.md"), "nested").unwrap();
+
+    let hidden = temp.path().join(".hidden");
+    fs::create_dir_all(&hidden).unwrap();
+    fs::write(hidden.join("2025-01-17.md"), "hidden").unwrap();
+
+    let output = djour_cmd()
+        .current_dir(temp.path())
+        .arg("list")
+        .arg("--recursive")
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("2025-01-15.md"));
+    assert!(stdout.contains("projects/2025-01-16.md"));
+    assert!(!stdout.contains("2025-01-17.md"));
+}

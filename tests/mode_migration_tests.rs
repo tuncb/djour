@@ -238,3 +238,19 @@ fn test_mode_weekly_to_daily_aborts_on_preface_outside_sections() {
     // Weekly file still present (nothing moved).
     assert!(temp.path().join(&weekly_name).exists());
 }
+
+#[test]
+fn test_mode_warns_recursive_is_omitted() {
+    let temp = TempDir::new().unwrap();
+
+    djour_cmd().arg("init").arg(temp.path()).assert().success();
+
+    djour_cmd()
+        .current_dir(temp.path())
+        .arg("mode")
+        .arg("weekly")
+        .arg("--dry-run")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("--recursive is omitted"));
+}

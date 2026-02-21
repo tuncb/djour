@@ -146,3 +146,30 @@ fn test_tags_not_in_djour_directory() {
         .failure()
         .stderr(predicate::str::contains("Not a djour directory"));
 }
+
+#[test]
+fn test_tags_recursive_includes_nested_notes_and_skips_dot_dirs() {
+    let temp = TempDir::new().unwrap();
+
+    djour_cmd().arg("init").arg(temp.path()).assert().success();
+
+    fs::write(temp.path().join("2025-01-15.md"), "Root #root").unwrap();
+
+    let nested = temp.path().join("projects");
+    fs::create_dir_all(&nested).unwrap();
+    fs::write(nested.join("2025-01-16.md"), "Nested #nested").unwrap();
+
+    let hidden = temp.path().join(".hidden");
+    fs::create_dir_all(&hidden).unwrap();
+    fs::write(hidden.join("2025-01-17.md"), "Hidden #hidden").unwrap();
+
+    djour_cmd()
+        .current_dir(temp.path())
+        .arg("tags")
+        .arg("--recursive")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("#root"))
+        .stdout(predicate::str::contains("#nested"))
+        .stdout(predicate::str::contains("#hidden").not());
+}

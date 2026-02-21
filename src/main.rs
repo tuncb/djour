@@ -63,7 +63,12 @@ fn run(cli: Cli) -> Result<(), DjourError> {
                 Ok(())
             }
         }
-        Some(Commands::List { from, to, limit }) => {
+        Some(Commands::List {
+            from,
+            to,
+            limit,
+            recursive,
+        }) => {
             // Discover repository
             let repo = FileSystemRepository::discover()?;
             let config = repo.load_config()?;
@@ -72,7 +77,14 @@ fn run(cli: Cli) -> Result<(), DjourError> {
             let to_date = parse_cli_date(to)?;
 
             // Execute list
-            let notes = list_notes(&repo, config.get_mode(), from_date, to_date, Some(limit))?;
+            let notes = list_notes(
+                &repo,
+                config.get_mode(),
+                from_date,
+                to_date,
+                Some(limit),
+                recursive,
+            )?;
 
             // Format and print output
             let output = format_note_list(&notes);
@@ -80,12 +92,16 @@ fn run(cli: Cli) -> Result<(), DjourError> {
 
             Ok(())
         }
-        Some(Commands::Tags { from, to }) => {
+        Some(Commands::Tags {
+            from,
+            to,
+            recursive,
+        }) => {
             let repo = FileSystemRepository::discover()?;
             let from_date = parse_cli_date(from)?;
             let to_date = parse_cli_date(to)?;
 
-            let tags = list_tags(&repo, from_date, to_date)?;
+            let tags = list_tags(&repo, from_date, to_date, recursive)?;
             let output = format_tag_list(&tags);
             print!("{}", output);
 
@@ -99,6 +115,7 @@ fn run(cli: Cli) -> Result<(), DjourError> {
             format,
             include_context,
             open,
+            recursive,
         }) => {
             // Discover repository
             let repo = FileSystemRepository::discover()?;
@@ -126,6 +143,7 @@ fn run(cli: Cli) -> Result<(), DjourError> {
                 to: to_date,
                 format: compilation_format,
                 include_context,
+                recursive,
             };
 
             // Execute compilation
@@ -153,6 +171,9 @@ fn run(cli: Cli) -> Result<(), DjourError> {
             archive_dir,
         }) => {
             let repo = FileSystemRepository::discover()?;
+            eprintln!(
+                "Warning: mode migration is non-recursive; --recursive is omitted for this command."
+            );
 
             let to_mode = JournalMode::from_str(&to).map_err(DjourError::Config)?;
             let from_mode = match from {

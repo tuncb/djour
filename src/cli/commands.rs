@@ -60,6 +60,10 @@ pub enum Commands {
         /// Maximum number of entries to show
         #[arg(long, default_value = "10")]
         limit: usize,
+
+        /// Search notes recursively (excluding directories that start with '.')
+        #[arg(long)]
+        recursive: bool,
     },
 
     /// Compile tagged content
@@ -90,6 +94,10 @@ pub enum Commands {
         /// Open compiled file in configured editor
         #[arg(long)]
         open: bool,
+
+        /// Search notes recursively (excluding directories that start with '.')
+        #[arg(long)]
+        recursive: bool,
     },
 
     /// List all tags used in notes
@@ -101,6 +109,10 @@ pub enum Commands {
         /// End date filter (inclusive, format: DD-MM-YYYY)
         #[arg(long)]
         to: Option<String>,
+
+        /// Search notes recursively (excluding directories that start with '.')
+        #[arg(long)]
+        recursive: bool,
     },
 
     /// Change journal mode and migrate existing notes (daily <-> weekly)
@@ -162,7 +174,21 @@ mod tests {
     fn parses_compile_open_flag() {
         let cli = Cli::try_parse_from(["djour", "compile", "work", "--open"]).unwrap();
         match cli.command {
-            Some(super::Commands::Compile { open, .. }) => assert!(open),
+            Some(super::Commands::Compile {
+                open, recursive, ..
+            }) => {
+                assert!(open);
+                assert!(!recursive);
+            }
+            _ => panic!("Expected compile command"),
+        }
+    }
+
+    #[test]
+    fn parses_compile_recursive_flag() {
+        let cli = Cli::try_parse_from(["djour", "compile", "work", "--recursive"]).unwrap();
+        match cli.command {
+            Some(super::Commands::Compile { recursive, .. }) => assert!(recursive),
             _ => panic!("Expected compile command"),
         }
     }
@@ -171,9 +197,14 @@ mod tests {
     fn parses_tags_command() {
         let cli = Cli::try_parse_from(["djour", "tags"]).unwrap();
         match cli.command {
-            Some(super::Commands::Tags { from, to }) => {
+            Some(super::Commands::Tags {
+                from,
+                to,
+                recursive,
+            }) => {
                 assert!(from.is_none());
                 assert!(to.is_none());
+                assert!(!recursive);
             }
             _ => panic!("Expected tags command"),
         }
@@ -192,11 +223,38 @@ mod tests {
         .unwrap();
 
         match cli.command {
-            Some(super::Commands::Tags { from, to }) => {
+            Some(super::Commands::Tags {
+                from,
+                to,
+                recursive,
+            }) => {
                 assert_eq!(from.as_deref(), Some("01-01-2025"));
                 assert_eq!(to.as_deref(), Some("31-01-2025"));
+                assert!(!recursive);
             }
             _ => panic!("Expected tags command"),
+        }
+    }
+
+    #[test]
+    fn parses_tags_recursive_flag() {
+        let cli = Cli::try_parse_from(["djour", "tags", "--recursive"]).unwrap();
+        match cli.command {
+            Some(super::Commands::Tags { recursive, .. }) => {
+                assert!(recursive);
+            }
+            _ => panic!("Expected tags command"),
+        }
+    }
+
+    #[test]
+    fn parses_list_recursive_flag() {
+        let cli = Cli::try_parse_from(["djour", "list", "--recursive"]).unwrap();
+        match cli.command {
+            Some(super::Commands::List { recursive, .. }) => {
+                assert!(recursive);
+            }
+            _ => panic!("Expected list command"),
         }
     }
 }

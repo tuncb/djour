@@ -12,6 +12,7 @@ pub fn list_notes(
     from: Option<NaiveDate>,
     to: Option<NaiveDate>,
     limit: Option<usize>,
+    recursive: bool,
 ) -> Result<Vec<NoteEntry>> {
-    repository.list_notes(mode, from, to, limit)
+    repository.list_notes(mode, from, to, limit, recursive)
 }

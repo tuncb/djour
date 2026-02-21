@@ -6,6 +6,7 @@ use crate::infrastructure::Config;
 use chrono::NaiveDate;
 use std::fs;
 use std::path::{Path, PathBuf};
+use walkdir::WalkDir;
 
 /// Represents a note file with its metadata
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -252,6 +253,94 @@ impl FileSystemRepository {
         Ok(())
     }
 
+    fn normalize_relative_path(path: &Path) -> Option<String> {
+        let parts: Vec<&str> = path
+            .iter()
+            .map(|part| part.to_str())
+            .collect::<Option<_>>()?;
+        Some(parts.join("/"))
+    }
+
+    fn note_entry_from_relative_path(mode: JournalMode, rel: &Path) -> Option<NoteEntry> {
+        let filename = Self::normalize_relative_path(rel)?;
+        let leaf = rel.file_name()?.to_str()?;
+
+        // Only consider markdown files.
+        if !leaf.ends_with(".md") {
+            return None;
+        }
+
+        match mode {
+            JournalMode::Single => {
+                if leaf == "journal.md" {
+                    Some(NoteEntry::new(filename, None))
+                } else {
+                    None
+                }
+            }
+            _ => mode
+                .date_from_filename(leaf)
+                .map(|d| NoteEntry::new(filename, Some(d))),
+        }
+    }
+
+    fn collect_root_note_entries(&self, mode: JournalMode) -> Result<Vec<NoteEntry>> {
+        let entries = fs::read_dir(&self.root)?;
+        let mut notes = Vec::new();
+
+        for entry in entries {
+            let Ok(entry) = entry else {
+                continue;
+            };
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let Ok(rel) = path.strip_prefix(&self.root) else {
+                continue;
+            };
+            if let Some(note) = Self::note_entry_from_relative_path(mode, rel) {
+                notes.push(note);
+            }
+        }
+
+        Ok(notes)
+    }
+
+    fn collect_recursive_note_entries(&self, mode: JournalMode) -> Vec<NoteEntry> {
+        let mut notes = Vec::new();
+
+        let walker = WalkDir::new(&self.root).into_iter().filter_entry(|entry| {
+            if entry.depth() == 0 {
+                return true;
+            }
+            if !entry.file_type().is_dir() {
+                return true;
+            }
+            entry
+                .file_name()
+                .to_str()
+                .is_none_or(|name| !name.starts_with('.'))
+        });
+
+        for entry in walker {
+            let Ok(entry) = entry else {
+                continue;
+            };
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            let Ok(rel) = entry.path().strip_prefix(&self.root) else {
+                continue;
+            };
+            if let Some(note) = Self::note_entry_from_relative_path(mode, rel) {
+                notes.push(note);
+            }
+        }
+
+        notes
+    }
+
     /// List all note files for the given mode
     /// Filters and sorts by date, applying optional date range and limit
     pub fn list_notes(
@@ -260,46 +349,13 @@ impl FileSystemRepository {
         from: Option<NaiveDate>,
         to: Option<NaiveDate>,
         limit: Option<usize>,
+        recursive: bool,
     ) -> Result<Vec<NoteEntry>> {
-        // Read directory entries
-        let entries = fs::read_dir(&self.root)?;
-
-        // Filter for valid note files and parse dates
-        let mut notes: Vec<NoteEntry> = entries
-            .filter_map(|entry| {
-                let entry = entry.ok()?;
-                let path = entry.path();
-
-                // Only process files (not directories)
-                if !path.is_file() {
-                    return None;
-                }
-
-                // Get filename
-                let filename = path.file_name()?.to_str()?.to_string();
-
-                // Only consider .md files
-                if !filename.ends_with(".md") {
-                    return None;
-                }
-
-                // Mode-specific filtering
-                match mode {
-                    JournalMode::Single => {
-                        if filename == "journal.md" {
-                            Some(NoteEntry::new(filename, None))
-                        } else {
-                            None
-                        }
-                    }
-                    _ => {
-                        // Try to parse date from filename
-                        mode.date_from_filename(&filename)
-                            .map(|d| NoteEntry::new(filename, Some(d)))
-                    }
-                }
-            })
-            .collect();
+        let mut notes = if recursive {
+            self.collect_recursive_note_entries(mode)
+        } else {
+            self.collect_root_note_entries(mode)?
+        };
 
         // Apply date range filters
         if let Some(from_date) = from {
@@ -601,7 +657,7 @@ mod tests {
         let repo = FileSystemRepository::new(temp.path().to_path_buf());
 
         let notes = repo
-            .list_notes(JournalMode::Daily, None, None, None)
+            .list_notes(JournalMode::Daily, None, None, None, false)
             .unwrap();
         assert_eq!(notes.len(), 0);
     }
@@ -617,7 +673,7 @@ mod tests {
         fs::write(temp.path().join("2025-01-15.md"), "note 3").unwrap();
 
         let notes = repo
-            .list_notes(JournalMode::Daily, None, None, None)
+            .list_notes(JournalMode::Daily, None, None, None, false)
             .unwrap();
 
         assert_eq!(notes.len(), 3);
@@ -639,12 +695,71 @@ mod tests {
         fs::create_dir(temp.path().join(".djour")).unwrap();
 
         let notes = repo
-            .list_notes(JournalMode::Daily, None, None, None)
+            .list_notes(JournalMode::Daily, None, None, None, false)
             .unwrap();
 
         // Should only include valid daily note
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].filename, "2025-01-17.md");
+    }
+
+    #[test]
+    fn test_list_notes_non_recursive_skips_nested_files() {
+        let temp = TempDir::new().unwrap();
+        let repo = FileSystemRepository::new(temp.path().to_path_buf());
+
+        fs::write(temp.path().join("2025-01-17.md"), "root").unwrap();
+        fs::create_dir_all(temp.path().join("nested")).unwrap();
+        fs::write(temp.path().join("nested").join("2025-01-18.md"), "nested").unwrap();
+
+        let notes = repo
+            .list_notes(JournalMode::Daily, None, None, None, false)
+            .unwrap();
+
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].filename, "2025-01-17.md");
+    }
+
+    #[test]
+    fn test_list_notes_recursive_includes_nested_and_skips_dot_dirs() {
+        let temp = TempDir::new().unwrap();
+        let repo = FileSystemRepository::new(temp.path().to_path_buf());
+
+        fs::write(temp.path().join("2025-01-15.md"), "root").unwrap();
+        fs::create_dir_all(temp.path().join("nested").join("project")).unwrap();
+        fs::write(
+            temp.path()
+                .join("nested")
+                .join("project")
+                .join("2025-01-16.md"),
+            "nested",
+        )
+        .unwrap();
+        fs::create_dir_all(temp.path().join(".hidden")).unwrap();
+        fs::write(temp.path().join(".hidden").join("2025-01-17.md"), "hidden").unwrap();
+        fs::create_dir_all(temp.path().join("nested").join(".cache")).unwrap();
+        fs::write(
+            temp.path()
+                .join("nested")
+                .join(".cache")
+                .join("2025-01-18.md"),
+            "hidden nested",
+        )
+        .unwrap();
+
+        let notes = repo
+            .list_notes(JournalMode::Daily, None, None, None, true)
+            .unwrap();
+
+        let filenames = notes
+            .iter()
+            .map(|entry| entry.filename.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            filenames,
+            vec!["nested/project/2025-01-16.md", "2025-01-15.md"]
+        );
     }
 
     #[test]
@@ -660,7 +775,7 @@ mod tests {
         let to = NaiveDate::from_ymd_opt(2025, 1, 18).unwrap();
 
         let notes = repo
-            .list_notes(JournalMode::Daily, Some(from), Some(to), None)
+            .list_notes(JournalMode::Daily, Some(from), Some(to), None, false)
             .unwrap();
 
         assert_eq!(notes.len(), 1);
@@ -677,7 +792,7 @@ mod tests {
         fs::write(temp.path().join("2025-01-15.md"), "note").unwrap();
 
         let notes = repo
-            .list_notes(JournalMode::Daily, None, None, Some(2))
+            .list_notes(JournalMode::Daily, None, None, Some(2), false)
             .unwrap();
 
         assert_eq!(notes.len(), 2);
@@ -695,7 +810,7 @@ mod tests {
         fs::write(temp.path().join("2025-01-17.md"), "other").unwrap();
 
         let notes = repo
-            .list_notes(JournalMode::Single, None, None, None)
+            .list_notes(JournalMode::Single, None, None, None, false)
             .unwrap();
 
         // Should only include journal.md
@@ -714,7 +829,7 @@ mod tests {
         fs::write(temp.path().join("2025-01-17.md"), "daily").unwrap(); // Should be ignored
 
         let notes = repo
-            .list_notes(JournalMode::Weekly, None, None, None)
+            .list_notes(JournalMode::Weekly, None, None, None, false)
             .unwrap();
 
         // Should only include weekly notes
@@ -733,7 +848,7 @@ mod tests {
         fs::write(temp.path().join("2025-01-17.md"), "daily").unwrap(); // Should be ignored
 
         let notes = repo
-            .list_notes(JournalMode::Monthly, None, None, None)
+            .list_notes(JournalMode::Monthly, None, None, None, false)
             .unwrap();
 
         // Should only include monthly notes

@@ -439,6 +439,40 @@ See [External](https://example.com). #work
 }
 
 #[test]
+fn test_compile_recursive_includes_nested_notes_and_skips_dot_dirs() {
+    let temp = TempDir::new().unwrap();
+    init_journal(&temp);
+
+    create_note(&temp, "2025-01-15.md", "Root task. #work");
+
+    let nested_dir = temp.path().join("projects");
+    fs::create_dir_all(&nested_dir).unwrap();
+    fs::write(
+        nested_dir.join("2025-01-16.md"),
+        "Nested task in project. #work",
+    )
+    .unwrap();
+
+    let hidden_dir = temp.path().join(".hidden");
+    fs::create_dir_all(&hidden_dir).unwrap();
+    fs::write(hidden_dir.join("2025-01-17.md"), "Hidden task. #work").unwrap();
+
+    djour_cmd()
+        .current_dir(temp.path())
+        .arg("compile")
+        .arg("work")
+        .arg("--recursive")
+        .assert()
+        .success();
+
+    let output = temp.path().join(".compilations/work.md");
+    let content = fs::read_to_string(output).unwrap();
+    assert!(content.contains("Root task. #work"));
+    assert!(content.contains("Nested task in project. #work"));
+    assert!(!content.contains("Hidden task. #work"));
+}
+
+#[test]
 fn test_compile_empty_query_fails() {
     let temp = TempDir::new().unwrap();
     init_journal(&temp);

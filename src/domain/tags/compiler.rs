@@ -119,10 +119,15 @@ impl TagCompiler {
         for tc in content {
             let filename = tc
                 .source_file
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("unknown")
+                .to_string_lossy()
+                .replace('\\', "/")
+                .trim()
                 .to_string();
+            let filename = if filename.is_empty() {
+                "unknown".to_string()
+            } else {
+                filename
+            };
 
             groups.entry(filename.clone()).or_default().push(tc);
         }

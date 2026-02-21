@@ -24,9 +24,10 @@ pub fn list_tags(
     repository: &FileSystemRepository,
     from: Option<NaiveDate>,
     to: Option<NaiveDate>,
+    recursive: bool,
 ) -> Result<Vec<String>> {
     let config = repository.load_config()?;
-    let notes = repository.list_notes(config.get_mode(), from, to, None)?;
+    let notes = repository.list_notes(config.get_mode(), from, to, None, recursive)?;
 
     let mut tags = BTreeSet::new();
     for note in notes {

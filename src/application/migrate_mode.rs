@@ -193,7 +193,7 @@ impl MigrateModeContext<'_> {
     fn plan_daily_to_weekly(&self) -> Result<DailyToWeeklyPlan> {
         let notes = self
             .repository
-            .list_notes(JournalMode::Daily, None, None, None)?;
+            .list_notes(JournalMode::Daily, None, None, None, false)?;
 
         let mut by_week: BTreeMap<chrono::NaiveDate, Vec<DailyEntry>> = BTreeMap::new();
         let mut daily_files_to_archive: Vec<String> = Vec::new();
@@ -305,7 +305,7 @@ impl MigrateModeContext<'_> {
     fn plan_weekly_to_daily(&self, archive_dir: &str) -> Result<WeeklyToDailyPlan> {
         let notes = self
             .repository
-            .list_notes(JournalMode::Weekly, None, None, None)?;
+            .list_notes(JournalMode::Weekly, None, None, None, false)?;
 
         // Ignore legacy weekly filenames (YYYY-Www.md). Only process the current weekly format
         // (YYYY-Www-YYYY-MM-DD.md) for migration.

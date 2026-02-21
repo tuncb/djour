@@ -32,6 +32,9 @@ pub struct CompileOptions {
 
     /// Include parent section headings for context
     pub include_context: bool,
+
+    /// Search notes recursively (excluding directories that start with '.')
+    pub recursive: bool,
 }
 
 /// Compile tagged content into an output markdown file.
@@ -75,6 +78,7 @@ pub fn compile_tags(repository: &FileSystemRepository, options: CompileOptions) 
         options.from,
         options.to,
         None, // No limit - get all notes
+        options.recursive,
     )?;
 
     if notes.is_empty() {
@@ -87,18 +91,21 @@ pub fn compile_tags(repository: &FileSystemRepository, options: CompileOptions) 
     // 5. Parse all files and extract tagged content
     let mut all_content: Vec<TaggedContent> = Vec::new();
 
+    // Use repository-relative source paths so grouped output can include subdirectories.
+    let output_context = output_path.strip_prefix(repository.root()).ok();
+
     for note in notes {
         let content = repository.read_note(&note.filename)?;
         if content.is_empty() {
             continue;
         }
 
-        let file_path = repository.root().join(&note.filename);
+        let file_path = PathBuf::from(&note.filename);
         let tagged = TagParser::extract_from_markdown_for_output(
             &content,
             &file_path,
             note.date,
-            Some(&output_path),
+            output_context,
         );
 
         all_content.extend(tagged);
@@ -127,7 +134,7 @@ pub fn compile_tags(repository: &FileSystemRepository, options: CompileOptions) 
         options.format,
         date_style,
         options.include_context,
-        Some(&output_path),
+        output_context,
     );
 
     // 8. Write output file
