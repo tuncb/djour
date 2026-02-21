@@ -115,6 +115,31 @@ pub enum Commands {
         recursive: bool,
     },
 
+    /// Convert one tag to another across notes
+    Retag {
+        /// Source tag name (with or without leading #)
+        from_tag: String,
+
+        /// Destination tag name (with or without leading #)
+        to_tag: String,
+
+        /// Start date filter (inclusive, format: DD-MM-YYYY)
+        #[arg(long)]
+        from: Option<String>,
+
+        /// End date filter (inclusive, format: DD-MM-YYYY)
+        #[arg(long)]
+        to: Option<String>,
+
+        /// Search notes recursively (excluding directories that start with '.')
+        #[arg(long)]
+        recursive: bool,
+
+        /// Show planned changes without writing files
+        #[arg(long)]
+        dry_run: bool,
+    },
+
     /// Change journal mode and migrate existing notes (daily <-> weekly)
     Mode {
         /// Target mode (daily or weekly)
@@ -255,6 +280,65 @@ mod tests {
                 assert!(recursive);
             }
             _ => panic!("Expected list command"),
+        }
+    }
+
+    #[test]
+    fn parses_retag_command_defaults() {
+        let cli = Cli::try_parse_from(["djour", "retag", "work", "focus"]).unwrap();
+        match cli.command {
+            Some(super::Commands::Retag {
+                from_tag,
+                to_tag,
+                from,
+                to,
+                recursive,
+                dry_run,
+            }) => {
+                assert_eq!(from_tag, "work");
+                assert_eq!(to_tag, "focus");
+                assert!(from.is_none());
+                assert!(to.is_none());
+                assert!(!recursive);
+                assert!(!dry_run);
+            }
+            _ => panic!("Expected retag command"),
+        }
+    }
+
+    #[test]
+    fn parses_retag_command_with_options() {
+        let cli = Cli::try_parse_from([
+            "djour",
+            "retag",
+            "#work",
+            "project",
+            "--from",
+            "01-01-2025",
+            "--to",
+            "31-01-2025",
+            "--recursive",
+            "--dry-run",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Some(super::Commands::Retag {
+                from_tag,
+                to_tag,
+                from,
+                to,
+                recursive,
+                dry_run,
+            }) => {
+                assert_eq!(from_tag, "#work");
+                assert_eq!(to_tag, "project");
+                assert_eq!(from.as_deref(), Some("01-01-2025"));
+                assert_eq!(to.as_deref(), Some("31-01-2025"));
+                assert!(recursive);
+                assert!(dry_run);
+            }
+            _ => panic!("Expected retag command"),
         }
     }
 }

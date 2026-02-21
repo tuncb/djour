@@ -8,6 +8,7 @@ Terminal journal and notes application written in Rust.
 - Time references: `today`, `yesterday`, `tomorrow`, weekdays, `last <weekday>`, `next <weekday>`, specific dates
 - Tag-aware markdown notes with boolean tag queries
 - Compile tagged content into markdown reports
+- Convert one tag to another across notes
 - Works with your preferred editor and plain files on disk
 
 ## Installation
@@ -34,6 +35,9 @@ djour list
 
 # List all tags used in notes
 djour tags
+
+# Convert all #work tags to #project
+djour retag work project
 
 # Compile all content tagged #work
 djour compile work
@@ -187,6 +191,25 @@ djour compile <QUERY> [OPTIONS]
 - `--include-context`: include parent section headings
 - `--open`: open compiled output in editor
 - `--recursive`: search notes recursively (excluding directories starting with `.`)
+
+### `retag`
+
+Convert one tag to another across notes.
+
+```bash
+djour retag <FROM_TAG> <TO_TAG> [OPTIONS]
+```
+
+- `<FROM_TAG>`: source tag (`work` or `#work`)
+- `<TO_TAG>`: destination tag (`project` or `#project`)
+- `--from <DATE>`: start date filter (`DD-MM-YYYY`)
+- `--to <DATE>`: end date filter (`DD-MM-YYYY`)
+- `--recursive`: search notes recursively (excluding directories starting with `.`)
+- `--dry-run`: show what would change without writing files
+
+Notes:
+- Retagging skips fenced code blocks and inline code spans.
+- Duplicate tags are preserved (no deduplication).
 
 ### `mode`
 

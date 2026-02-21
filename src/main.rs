@@ -2,7 +2,7 @@ use chrono::NaiveDate;
 use clap::Parser;
 use djour::application::{
     compile_tags, get_config, init, list_config, list_notes, list_tags, migrate_mode, open_note,
-    set_config, CompileOptions, ModeMigrationOptions,
+    retag_notes, set_config, CompileOptions, ModeMigrationOptions, RetagOptions,
 };
 use djour::cli::{format_note_list, format_tag_list, Cli, Commands};
 use djour::domain::tags::CompilationFormat;
@@ -190,6 +190,46 @@ fn run(cli: Cli) -> Result<(), DjourError> {
             };
 
             migrate_mode(&repo, options)
+        }
+        Some(Commands::Retag {
+            from_tag,
+            to_tag,
+            from,
+            to,
+            recursive,
+            dry_run,
+        }) => {
+            let repo = FileSystemRepository::discover()?;
+            let from_date = parse_cli_date(from)?;
+            let to_date = parse_cli_date(to)?;
+
+            let options = RetagOptions {
+                from_tag,
+                to_tag,
+                from: from_date,
+                to: to_date,
+                recursive,
+                dry_run,
+            };
+
+            let report = retag_notes(&repo, options)?;
+            if report.dry_run {
+                println!(
+                    "Dry run: {} file(s) would be updated with {} replacement(s).",
+                    report.changed_files, report.total_replacements
+                );
+            } else {
+                println!(
+                    "Updated {} file(s) with {} replacement(s).",
+                    report.changed_files, report.total_replacements
+                );
+            }
+
+            for change in report.changes {
+                println!("{} ({})", change.filename, change.replacements);
+            }
+
+            Ok(())
         }
         None => {
             // Check if time_ref provided (open command)

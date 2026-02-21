@@ -1,0 +1,4 @@
+[[command]]
+args = ["retag", "work", "focus"]
+expect_exit = 0
+stdout_contains = ["Updated 1 file(s) with 2 replacement(s)."]
