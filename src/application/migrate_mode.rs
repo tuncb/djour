@@ -21,8 +21,15 @@ pub struct ModeMigrationOptions {
     pub archive_dir: Option<PathBuf>,
 }
 
-pub struct MigrateModeService {
-    repository: FileSystemRepository,
+pub fn migrate_mode(
+    repository: &FileSystemRepository,
+    options: ModeMigrationOptions,
+) -> Result<()> {
+    MigrateModeContext { repository }.execute(options)
+}
+
+struct MigrateModeContext<'a> {
+    repository: &'a FileSystemRepository,
 }
 
 #[derive(Debug, Clone)]
@@ -65,11 +72,7 @@ struct WeeklyToDailyPlan {
     weekly_files: Vec<WeeklyFilePlan>,
 }
 
-impl MigrateModeService {
-    pub fn new(repository: FileSystemRepository) -> Self {
-        Self { repository }
-    }
-
+impl MigrateModeContext<'_> {
     pub fn execute(&self, options: ModeMigrationOptions) -> Result<()> {
         let mut config = self.repository.load_config()?;
 

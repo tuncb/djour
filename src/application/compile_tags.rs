@@ -34,129 +34,115 @@ pub struct CompileOptions {
     pub include_context: bool,
 }
 
-/// Service for compiling tags
-pub struct CompileTagsService {
-    repository: FileSystemRepository,
-}
+/// Compile tagged content into an output markdown file.
+///
+/// Returns the path to the generated compilation file.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The query is invalid
+/// - No notes are found
+/// - No content matches the query
+/// - File I/O fails
+pub fn compile_tags(repository: &FileSystemRepository, options: CompileOptions) -> Result<PathBuf> {
+    // 1. Parse query
+    let query = TagQuery::parse(&options.query)?;
 
-impl CompileTagsService {
-    /// Create new compile tags service
-    pub fn new(repository: FileSystemRepository) -> Self {
-        CompileTagsService { repository }
+    // 2. Load config to get mode
+    let config = repository.load_config()?;
+
+    // 3. Determine output path
+    let output_path = if let Some(path) = options.output.clone() {
+        // Use provided path
+        if path.is_absolute() {
+            path
+        } else {
+            repository.root().join(path)
+        }
+    } else {
+        // Default: .compilations/<query>.md (sanitize query string)
+        let sanitized = sanitize_filename(&options.query);
+        repository
+            .root()
+            .join(".compilations")
+            .join(format!("{}.md", sanitized))
+    };
+
+    // 4. List all note files (with date filters)
+    let notes = repository.list_notes(
+        config.get_mode(),
+        options.from,
+        options.to,
+        None, // No limit - get all notes
+    )?;
+
+    if notes.is_empty() {
+        return Err(DjourError::TagNotFound(format!(
+            "No notes found for query: {}",
+            options.query
+        )));
     }
 
-    /// Execute the compilation
-    ///
-    /// Returns the path to the generated compilation file.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - The query is invalid
-    /// - No notes are found
-    /// - No content matches the query
-    /// - File I/O fails
-    pub fn execute(&self, options: CompileOptions) -> Result<PathBuf> {
-        // 1. Parse query
-        let query = TagQuery::parse(&options.query)?;
+    // 5. Parse all files and extract tagged content
+    let mut all_content: Vec<TaggedContent> = Vec::new();
 
-        // 2. Load config to get mode
-        let config = self.repository.load_config()?;
-
-        // 3. Determine output path
-        let output_path = if let Some(path) = options.output.clone() {
-            // Use provided path
-            if path.is_absolute() {
-                path
-            } else {
-                self.repository.root().join(path)
-            }
-        } else {
-            // Default: .compilations/<query>.md (sanitize query string)
-            let sanitized = sanitize_filename(&options.query);
-            self.repository
-                .root()
-                .join(".compilations")
-                .join(format!("{}.md", sanitized))
-        };
-
-        // 4. List all note files (with date filters)
-        let notes = self.repository.list_notes(
-            config.get_mode(),
-            options.from,
-            options.to,
-            None, // No limit - get all notes
-        )?;
-
-        if notes.is_empty() {
-            return Err(DjourError::TagNotFound(format!(
-                "No notes found for query: {}",
-                options.query
-            )));
+    for note in notes {
+        let content = repository.read_note(&note.filename)?;
+        if content.is_empty() {
+            continue;
         }
 
-        // 5. Parse all files and extract tagged content
-        let mut all_content: Vec<TaggedContent> = Vec::new();
-
-        for note in notes {
-            let content = self.repository.read_note(&note.filename)?;
-            if content.is_empty() {
-                continue;
-            }
-
-            let file_path = self.repository.root().join(&note.filename);
-            let tagged = TagParser::extract_from_markdown_for_output(
-                &content,
-                &file_path,
-                note.date,
-                Some(&output_path),
-            );
-
-            all_content.extend(tagged);
-        }
-
-        // 6. Filter by query
-        let filtered = TagCompiler::filter(all_content, &query);
-
-        if filtered.is_empty() {
-            return Err(DjourError::TagNotFound(format!(
-                "No content found matching query: {}",
-                options.query
-            )));
-        }
-
-        // 7. Generate markdown output
-        let date_style = match config.get_mode() {
-            JournalMode::Weekly => CompilationDateStyle::WeekRange,
-            JournalMode::Monthly => CompilationDateStyle::MonthRange,
-            _ => CompilationDateStyle::SingleDate,
-        };
-
-        let markdown = TagCompiler::to_markdown_for_output(
-            filtered,
-            &query,
-            options.format,
-            date_style,
-            options.include_context,
+        let file_path = repository.root().join(&note.filename);
+        let tagged = TagParser::extract_from_markdown_for_output(
+            &content,
+            &file_path,
+            note.date,
             Some(&output_path),
         );
 
-        // 8. Write output file
-        // Convert absolute path to relative for repository.write_note
-        let relative_path = output_path
-            .strip_prefix(self.repository.root())
-            .map_err(|_| {
-                DjourError::Config("Output path must be within journal directory".to_string())
-            })?;
-
-        let relative_str = relative_path
-            .to_str()
-            .ok_or_else(|| DjourError::Config("Invalid output path".to_string()))?;
-
-        self.repository.write_note(relative_str, &markdown)?;
-
-        Ok(output_path)
+        all_content.extend(tagged);
     }
+
+    // 6. Filter by query
+    let filtered = TagCompiler::filter(all_content, &query);
+
+    if filtered.is_empty() {
+        return Err(DjourError::TagNotFound(format!(
+            "No content found matching query: {}",
+            options.query
+        )));
+    }
+
+    // 7. Generate markdown output
+    let date_style = match config.get_mode() {
+        JournalMode::Weekly => CompilationDateStyle::WeekRange,
+        JournalMode::Monthly => CompilationDateStyle::MonthRange,
+        _ => CompilationDateStyle::SingleDate,
+    };
+
+    let markdown = TagCompiler::to_markdown_for_output(
+        filtered,
+        &query,
+        options.format,
+        date_style,
+        options.include_context,
+        Some(&output_path),
+    );
+
+    // 8. Write output file
+    // Convert absolute path to relative for repository.write_note
+    let relative_path = output_path.strip_prefix(repository.root()).map_err(|_| {
+        DjourError::Config("Output path must be within journal directory".to_string())
+    })?;
+
+    let relative_str = relative_path
+        .to_str()
+        .ok_or_else(|| DjourError::Config("Invalid output path".to_string()))?;
+
+    repository.write_note(relative_str, &markdown)?;
+
+    Ok(output_path)
 }
 
 /// Sanitize query string for use as filename

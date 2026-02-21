@@ -1,8 +1,8 @@
 use chrono::NaiveDate;
 use clap::Parser;
 use djour::application::{
-    init::InitService, manage_config::ConfigService, CompileOptions, CompileTagsService,
-    ListNotesService, ListTagsService, MigrateModeService, ModeMigrationOptions, OpenNoteService,
+    compile_tags, get_config, init, list_config, list_notes, list_tags, migrate_mode, open_note,
+    set_config, CompileOptions, ModeMigrationOptions,
 };
 use djour::cli::{format_note_list, format_tag_list, Cli, Commands};
 use djour::domain::tags::CompilationFormat;
@@ -32,28 +32,27 @@ fn run(cli: Cli) -> Result<(), DjourError> {
             let journal_mode = JournalMode::from_str(&mode).map_err(DjourError::Config)?;
 
             // Execute init
-            InitService::execute(&path, journal_mode)
+            init(&path, journal_mode)
         }
         Some(Commands::Config { key, value, list }) => {
             // Discover repository
             let repo = FileSystemRepository::discover()?;
-            let service = ConfigService::new(repo);
 
             if list {
                 // List all config
-                let config = service.list()?;
+                let config = list_config(&repo)?;
                 println!("mode = {}", format!("{:?}", config.mode).to_lowercase());
                 println!("editor = {}", config.editor);
                 Ok(())
             } else if let Some(k) = key {
                 if let Some(v) = value {
                     // Set config value
-                    service.set(&k, &v)?;
+                    set_config(&repo, &k, &v)?;
                     println!("Set {} = {}", k, v);
                     Ok(())
                 } else {
                     // Get config value
-                    let val = service.get(&k)?;
+                    let val = get_config(&repo, &k)?;
                     println!("{}", val);
                     Ok(())
                 }
@@ -73,8 +72,7 @@ fn run(cli: Cli) -> Result<(), DjourError> {
             let to_date = parse_cli_date(to)?;
 
             // Execute list
-            let service = ListNotesService::new(repo);
-            let notes = service.execute(config.get_mode(), from_date, to_date, Some(limit))?;
+            let notes = list_notes(&repo, config.get_mode(), from_date, to_date, Some(limit))?;
 
             // Format and print output
             let output = format_note_list(&notes);
@@ -87,8 +85,7 @@ fn run(cli: Cli) -> Result<(), DjourError> {
             let from_date = parse_cli_date(from)?;
             let to_date = parse_cli_date(to)?;
 
-            let service = ListTagsService::new(repo);
-            let tags = service.execute(from_date, to_date)?;
+            let tags = list_tags(&repo, from_date, to_date)?;
             let output = format_tag_list(&tags);
             print!("{}", output);
 
@@ -132,8 +129,7 @@ fn run(cli: Cli) -> Result<(), DjourError> {
             };
 
             // Execute compilation
-            let service = CompileTagsService::new(repo.clone());
-            let output_path = service.execute(options)?;
+            let output_path = compile_tags(&repo, options)?;
 
             if open {
                 let config = repo.load_config()?;
@@ -157,7 +153,6 @@ fn run(cli: Cli) -> Result<(), DjourError> {
             archive_dir,
         }) => {
             let repo = FileSystemRepository::discover()?;
-            let service = MigrateModeService::new(repo);
 
             let to_mode = JournalMode::from_str(&to).map_err(DjourError::Config)?;
             let from_mode = match from {
@@ -173,15 +168,14 @@ fn run(cli: Cli) -> Result<(), DjourError> {
                 archive_dir,
             };
 
-            service.execute(options)
+            migrate_mode(&repo, options)
         }
         None => {
             // Check if time_ref provided (open command)
             if let Some(time_ref) = cli.time_ref {
                 // Resolve/create note and print filename
                 let repo = FileSystemRepository::discover()?;
-                let service = OpenNoteService::new(repo);
-                let filename = service.execute(&time_ref, cli.open)?;
+                let filename = open_note(&repo, &time_ref, cli.open)?;
                 println!("{}", filename);
                 Ok(())
             } else {

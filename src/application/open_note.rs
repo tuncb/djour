@@ -5,67 +5,59 @@ use crate::error::Result;
 use crate::infrastructure::{EditorSession, FileSystemRepository, JournalRepository};
 use chrono::Local;
 
-/// Service for opening notes in editor
-pub struct OpenNoteService {
-    repository: FileSystemRepository,
-}
+/// Resolve time reference to note filename, creating the note if needed.
+/// Opens the file in editor only when `open_in_editor` is true.
+pub fn open_note(
+    repository: &FileSystemRepository,
+    time_ref_str: &str,
+    open_in_editor: bool,
+) -> Result<String> {
+    // 1. Load config to get mode and editor
+    let config = repository.load_config()?;
 
-impl OpenNoteService {
-    /// Create a new open note service
-    pub fn new(repository: FileSystemRepository) -> Self {
-        OpenNoteService { repository }
-    }
+    // 2. Parse time reference
+    let time_ref = TimeReference::parse(time_ref_str)?;
 
-    /// Resolve time reference to note filename, creating the note if needed.
-    /// Opens the file in editor only when `open_in_editor` is true.
-    pub fn execute(&self, time_ref_str: &str, open_in_editor: bool) -> Result<String> {
-        // 1. Load config to get mode and editor
-        let config = self.repository.load_config()?;
+    // 3. Resolve to date
+    let date = time_ref.resolve(Local::now().date_naive());
 
-        // 2. Parse time reference
-        let time_ref = TimeReference::parse(time_ref_str)?;
+    // 4. Generate filename based on mode
+    let mode = config.get_mode();
+    let filename = mode.filename_for_date(date);
 
-        // 3. Resolve to date
-        let date = time_ref.resolve(Local::now().date_naive());
+    // 5. Check if file exists
+    if !repository.note_exists(&filename) {
+        // 6. Create file with template
+        let template_name = mode.template_name();
+        let template = load_template(repository.root(), template_name)?;
+        let content = template.render(date);
 
-        // 4. Generate filename based on mode
-        let mode = config.get_mode();
-        let filename = mode.filename_for_date(date);
-
-        // 5. Check if file exists
-        if !self.repository.note_exists(&filename) {
-            // 6. Create file with template
-            let template_name = mode.template_name();
-            let template = load_template(self.repository.root(), template_name)?;
-            let content = template.render(date);
-
-            // Special handling for Single mode
-            if matches!(mode, JournalMode::Single) {
-                // Append to existing file
-                let existing = self.repository.read_note(&filename)?;
-                let new_content = if existing.is_empty() {
-                    content
-                } else {
-                    format!("{}\n{}", existing, content)
-                };
-                self.repository.write_note(&filename, &new_content)?;
+        // Special handling for Single mode
+        if matches!(mode, JournalMode::Single) {
+            // Append to existing file
+            let existing = repository.read_note(&filename)?;
+            let new_content = if existing.is_empty() {
+                content
             } else {
-                // Create new file
-                self.repository.write_note(&filename, &content)?;
-            }
+                format!("{}\n{}", existing, content)
+            };
+            repository.write_note(&filename, &new_content)?;
+        } else {
+            // Create new file
+            repository.write_note(&filename, &content)?;
         }
-
-        // 7. Open in editor when requested
-        if open_in_editor {
-            let editor_cmd = config.get_editor();
-            let editor = EditorSession::new(editor_cmd);
-
-            let file_path = self.repository.root().join(&filename);
-            editor.open(&file_path)?;
-        }
-
-        Ok(filename)
     }
+
+    // 7. Open in editor when requested
+    if open_in_editor {
+        let editor_cmd = config.get_editor();
+        let editor = EditorSession::new(editor_cmd);
+
+        let file_path = repository.root().join(&filename);
+        editor.open(&file_path)?;
+    }
+
+    Ok(filename)
 }
 
 #[cfg(test)]
@@ -87,8 +79,6 @@ mod tests {
 
         // Note: We can't test editor.open() in automated tests
         // Test everything up to that point
-
-        let _service = OpenNoteService::new(repo.clone());
 
         // Parse time reference (today)
         let time_ref = TimeReference::parse("today").unwrap();

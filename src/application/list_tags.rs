@@ -19,32 +19,22 @@ fn collect_tags_from_text(text: &str, output: &mut BTreeSet<String>) {
     }
 }
 
-/// Service for listing all tags used in notes.
-pub struct ListTagsService {
-    repository: FileSystemRepository,
-}
+/// List all tags used in notes with optional date filters.
+pub fn list_tags(
+    repository: &FileSystemRepository,
+    from: Option<NaiveDate>,
+    to: Option<NaiveDate>,
+) -> Result<Vec<String>> {
+    let config = repository.load_config()?;
+    let notes = repository.list_notes(config.get_mode(), from, to, None)?;
 
-impl ListTagsService {
-    /// Create a new list tags service.
-    pub fn new(repository: FileSystemRepository) -> Self {
-        Self { repository }
+    let mut tags = BTreeSet::new();
+    for note in notes {
+        let content = repository.read_note(&note.filename)?;
+        collect_tags_from_text(&content, &mut tags);
     }
 
-    /// Execute tag listing with optional date filters.
-    pub fn execute(&self, from: Option<NaiveDate>, to: Option<NaiveDate>) -> Result<Vec<String>> {
-        let config = self.repository.load_config()?;
-        let notes = self
-            .repository
-            .list_notes(config.get_mode(), from, to, None)?;
-
-        let mut tags = BTreeSet::new();
-        for note in notes {
-            let content = self.repository.read_note(&note.filename)?;
-            collect_tags_from_text(&content, &mut tags);
-        }
-
-        Ok(tags.into_iter().collect())
-    }
+    Ok(tags.into_iter().collect())
 }
 
 #[cfg(test)]

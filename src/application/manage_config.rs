@@ -5,57 +5,45 @@ use crate::error::{DjourError, Result};
 use crate::infrastructure::{Config, FileSystemRepository, JournalRepository};
 use std::str::FromStr;
 
-/// Service for managing journal configuration
-pub struct ConfigService {
-    repository: FileSystemRepository,
+/// Get a single config value.
+pub fn get_config(repository: &FileSystemRepository, key: &str) -> Result<String> {
+    let config = repository.load_config()?;
+
+    match key {
+        "mode" => Ok(format!("{:?}", config.mode).to_lowercase()),
+        "editor" => Ok(config.editor.clone()),
+        _ => Err(DjourError::Config(format!(
+            "Unknown config key: '{}'. Valid keys are: mode, editor",
+            key
+        ))),
+    }
 }
 
-impl ConfigService {
-    /// Create a new config service
-    pub fn new(repository: FileSystemRepository) -> Self {
-        ConfigService { repository }
-    }
+/// Set a config value.
+pub fn set_config(repository: &FileSystemRepository, key: &str, value: &str) -> Result<()> {
+    let mut config = repository.load_config()?;
 
-    /// Get a single config value
-    pub fn get(&self, key: &str) -> Result<String> {
-        let config = self.repository.load_config()?;
-
-        match key {
-            "mode" => Ok(format!("{:?}", config.mode).to_lowercase()),
-            "editor" => Ok(config.editor.clone()),
-            _ => Err(DjourError::Config(format!(
+    match key {
+        "mode" => {
+            let mode = JournalMode::from_str(value).map_err(DjourError::Config)?;
+            config.mode = mode;
+        }
+        "editor" => {
+            config.editor = value.to_string();
+        }
+        _ => {
+            return Err(DjourError::Config(format!(
                 "Unknown config key: '{}'. Valid keys are: mode, editor",
                 key
-            ))),
+            )));
         }
     }
 
-    /// Set a config value
-    pub fn set(&self, key: &str, value: &str) -> Result<()> {
-        let mut config = self.repository.load_config()?;
+    repository.save_config(&config)?;
+    Ok(())
+}
 
-        match key {
-            "mode" => {
-                let mode = JournalMode::from_str(value).map_err(DjourError::Config)?;
-                config.mode = mode;
-            }
-            "editor" => {
-                config.editor = value.to_string();
-            }
-            _ => {
-                return Err(DjourError::Config(format!(
-                    "Unknown config key: '{}'. Valid keys are: mode, editor",
-                    key
-                )));
-            }
-        }
-
-        self.repository.save_config(&config)?;
-        Ok(())
-    }
-
-    /// List all config values
-    pub fn list(&self) -> Result<Config> {
-        self.repository.load_config()
-    }
+/// List all config values.
+pub fn list_config(repository: &FileSystemRepository) -> Result<Config> {
+    repository.load_config()
 }
