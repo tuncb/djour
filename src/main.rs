@@ -2,9 +2,9 @@ use chrono::NaiveDate;
 use clap::Parser;
 use djour::application::{
     init::InitService, manage_config::ConfigService, CompileOptions, CompileTagsService,
-    ListNotesService, MigrateModeService, ModeMigrationOptions, OpenNoteService,
+    ListNotesService, ListTagsService, MigrateModeService, ModeMigrationOptions, OpenNoteService,
 };
-use djour::cli::{format_note_list, Cli, Commands};
+use djour::cli::{format_note_list, format_tag_list, Cli, Commands};
 use djour::domain::tags::CompilationFormat;
 use djour::domain::JournalMode;
 use djour::error::DjourError;
@@ -69,22 +69,8 @@ fn run(cli: Cli) -> Result<(), DjourError> {
             let repo = FileSystemRepository::discover()?;
             let config = repo.load_config()?;
 
-            // Parse date strings (DD-MM-YYYY format)
-            let from_date = if let Some(s) = from {
-                Some(NaiveDate::parse_from_str(&s, "%d-%m-%Y").map_err(|_| {
-                    DjourError::Config(format!("Invalid date format: {}. Use DD-MM-YYYY", s))
-                })?)
-            } else {
-                None
-            };
-
-            let to_date = if let Some(s) = to {
-                Some(NaiveDate::parse_from_str(&s, "%d-%m-%Y").map_err(|_| {
-                    DjourError::Config(format!("Invalid date format: {}. Use DD-MM-YYYY", s))
-                })?)
-            } else {
-                None
-            };
+            let from_date = parse_cli_date(from)?;
+            let to_date = parse_cli_date(to)?;
 
             // Execute list
             let service = ListNotesService::new(repo);
@@ -92,6 +78,18 @@ fn run(cli: Cli) -> Result<(), DjourError> {
 
             // Format and print output
             let output = format_note_list(&notes);
+            print!("{}", output);
+
+            Ok(())
+        }
+        Some(Commands::Tags { from, to }) => {
+            let repo = FileSystemRepository::discover()?;
+            let from_date = parse_cli_date(from)?;
+            let to_date = parse_cli_date(to)?;
+
+            let service = ListTagsService::new(repo);
+            let tags = service.execute(from_date, to_date)?;
+            let output = format_tag_list(&tags);
             print!("{}", output);
 
             Ok(())
@@ -108,22 +106,8 @@ fn run(cli: Cli) -> Result<(), DjourError> {
             // Discover repository
             let repo = FileSystemRepository::discover()?;
 
-            // Parse date strings (DD-MM-YYYY format)
-            let from_date = if let Some(s) = from {
-                Some(NaiveDate::parse_from_str(&s, "%d-%m-%Y").map_err(|_| {
-                    DjourError::Config(format!("Invalid date format: {}. Use DD-MM-YYYY", s))
-                })?)
-            } else {
-                None
-            };
-
-            let to_date = if let Some(s) = to {
-                Some(NaiveDate::parse_from_str(&s, "%d-%m-%Y").map_err(|_| {
-                    DjourError::Config(format!("Invalid date format: {}. Use DD-MM-YYYY", s))
-                })?)
-            } else {
-                None
-            };
+            let from_date = parse_cli_date(from)?;
+            let to_date = parse_cli_date(to)?;
 
             // Parse format string
             let compilation_format = match format.to_lowercase().as_str() {
@@ -208,4 +192,14 @@ fn run(cli: Cli) -> Result<(), DjourError> {
             }
         }
     }
+}
+
+fn parse_cli_date(value: Option<String>) -> Result<Option<NaiveDate>, DjourError> {
+    value
+        .map(|s| {
+            NaiveDate::parse_from_str(&s, "%d-%m-%Y").map_err(|_| {
+                DjourError::Config(format!("Invalid date format: {}. Use DD-MM-YYYY", s))
+            })
+        })
+        .transpose()
 }

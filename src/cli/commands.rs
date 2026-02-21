@@ -92,6 +92,17 @@ pub enum Commands {
         open: bool,
     },
 
+    /// List all tags used in notes
+    Tags {
+        /// Start date filter (inclusive, format: DD-MM-YYYY)
+        #[arg(long)]
+        from: Option<String>,
+
+        /// End date filter (inclusive, format: DD-MM-YYYY)
+        #[arg(long)]
+        to: Option<String>,
+    },
+
     /// Change journal mode and migrate existing notes (daily <-> weekly)
     Mode {
         /// Target mode (daily or weekly)
@@ -153,6 +164,39 @@ mod tests {
         match cli.command {
             Some(super::Commands::Compile { open, .. }) => assert!(open),
             _ => panic!("Expected compile command"),
+        }
+    }
+
+    #[test]
+    fn parses_tags_command() {
+        let cli = Cli::try_parse_from(["djour", "tags"]).unwrap();
+        match cli.command {
+            Some(super::Commands::Tags { from, to }) => {
+                assert!(from.is_none());
+                assert!(to.is_none());
+            }
+            _ => panic!("Expected tags command"),
+        }
+    }
+
+    #[test]
+    fn parses_tags_command_with_date_filters() {
+        let cli = Cli::try_parse_from([
+            "djour",
+            "tags",
+            "--from",
+            "01-01-2025",
+            "--to",
+            "31-01-2025",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Some(super::Commands::Tags { from, to }) => {
+                assert_eq!(from.as_deref(), Some("01-01-2025"));
+                assert_eq!(to.as_deref(), Some("31-01-2025"));
+            }
+            _ => panic!("Expected tags command"),
         }
     }
 }

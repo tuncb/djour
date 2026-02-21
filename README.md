@@ -32,6 +32,9 @@ djour --open today
 # List recent notes
 djour list
 
+# List all tags used in notes
+djour tags
+
 # Compile all content tagged #work
 djour compile work
 ```
@@ -154,6 +157,17 @@ djour list [--from <DATE>] [--to <DATE>] [--limit <N>]
 - `--from <DATE>`: start date inclusive (`DD-MM-YYYY`)
 - `--to <DATE>`: end date inclusive (`DD-MM-YYYY`)
 - `--limit <N>`: max entries to show (default: `10`)
+
+### `tags`
+
+List all tags used in notes.
+
+```bash
+djour tags [--from <DATE>] [--to <DATE>]
+```
+
+- `--from <DATE>`: start date filter (`DD-MM-YYYY`)
+- `--to <DATE>`: end date filter (`DD-MM-YYYY`)
 
 ### `compile`
 
