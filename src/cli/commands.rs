@@ -154,10 +154,6 @@ pub enum Commands {
         #[arg(long)]
         dry_run: bool,
 
-        /// Apply the migration (required unless --dry-run)
-        #[arg(long)]
-        yes: bool,
-
         /// Archive directory (relative to journal root)
         #[arg(long)]
         archive_dir: Option<PathBuf>,
@@ -340,5 +336,31 @@ mod tests {
             }
             _ => panic!("Expected retag command"),
         }
+    }
+
+    #[test]
+    fn parses_mode_command_without_confirmation_flag() {
+        let cli = Cli::try_parse_from(["djour", "mode", "weekly"]).unwrap();
+
+        match cli.command {
+            Some(super::Commands::Mode {
+                to,
+                from,
+                dry_run,
+                archive_dir,
+            }) => {
+                assert_eq!(to, "weekly");
+                assert!(from.is_none());
+                assert!(!dry_run);
+                assert!(archive_dir.is_none());
+            }
+            _ => panic!("Expected mode command"),
+        }
+    }
+
+    #[test]
+    fn rejects_removed_mode_yes_flag() {
+        let result = Cli::try_parse_from(["djour", "mode", "weekly", "--yes"]);
+        assert!(result.is_err());
     }
 }

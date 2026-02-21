@@ -167,7 +167,6 @@ fn run(cli: Cli) -> Result<(), DjourError> {
             to,
             from,
             dry_run,
-            yes,
             archive_dir,
         }) => {
             let repo = FileSystemRepository::discover()?;
@@ -185,7 +184,6 @@ fn run(cli: Cli) -> Result<(), DjourError> {
                 to_mode,
                 from_mode,
                 dry_run,
-                yes,
                 archive_dir,
             };
 

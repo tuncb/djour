@@ -24,11 +24,11 @@ Non-goals (v1):
 Add a new subcommand (keep `djour config mode` as config-only):
 
 ```bash
-djour mode <daily|weekly> [--dry-run] [--yes] [--archive-dir <path>] [--from <daily|weekly>]
+djour mode <daily|weekly> [--dry-run] [--archive-dir <path>] [--from <daily|weekly>]
 ```
 
 Behavior:
-- Default: print a migration plan and refuse to run unless `--yes` is provided.
+- Default: print a migration plan and apply the migration.
 - `--dry-run`: print the plan only (no writes).
 - `--archive-dir`: optional override for the archive directory.
 - `--from`: optional override for the detected current storage mode:

@@ -111,7 +111,6 @@ fn test_mode_daily_to_weekly_migrates_and_archives() {
         .current_dir(temp.path())
         .arg("mode")
         .arg("weekly")
-        .arg("--yes")
         .assert()
         .success();
 
@@ -163,7 +162,6 @@ fn test_mode_weekly_to_daily_splits_and_archives() {
         .current_dir(temp.path())
         .arg("mode")
         .arg("daily")
-        .arg("--yes")
         .assert()
         .success();
 
@@ -199,7 +197,6 @@ fn test_mode_migration_refuses_custom_templates() {
         .current_dir(temp.path())
         .arg("mode")
         .arg("weekly")
-        .arg("--yes")
         .assert()
         .failure()
         .stderr(predicate::str::contains("built-in templates"));
@@ -226,7 +223,6 @@ fn test_mode_weekly_to_daily_aborts_on_preface_outside_sections() {
         .current_dir(temp.path())
         .arg("mode")
         .arg("daily")
-        .arg("--yes")
         .assert()
         .failure()
         .stderr(predicate::str::contains("between the header and Monday"));

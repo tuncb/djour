@@ -222,7 +222,6 @@ djour mode <MODE> [OPTIONS]
 - `<MODE>`: target mode (`daily` or `weekly`)
 - `--from <MODE>`: override detected current mode (`daily` or `weekly`)
 - `--dry-run`: show migration plan only
-- `--yes`: apply migration (required unless `--dry-run`)
 - `--archive-dir <PATH>`: archive folder relative to journal root
 - Note: `mode` migration is always non-recursive; `--recursive` is intentionally omitted.
 

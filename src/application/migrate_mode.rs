@@ -17,7 +17,6 @@ pub struct ModeMigrationOptions {
     pub to_mode: JournalMode,
     pub from_mode: Option<JournalMode>,
     pub dry_run: bool,
-    pub yes: bool,
     pub archive_dir: Option<PathBuf>,
 }
 
@@ -111,12 +110,6 @@ impl MigrateModeContext<'_> {
                 if options.dry_run {
                     return Ok(());
                 }
-                if !options.yes {
-                    println!(
-                        "Refusing to run without --yes. Re-run with --yes to apply the migration."
-                    );
-                    return Ok(());
-                }
 
                 self.apply_daily_to_weekly(&archive_dir, plan)?;
                 config.mode = JournalMode::Weekly;
@@ -129,12 +122,6 @@ impl MigrateModeContext<'_> {
                 self.print_plan_weekly_to_daily(&archive_dir, &plan);
 
                 if options.dry_run {
-                    return Ok(());
-                }
-                if !options.yes {
-                    println!(
-                        "Refusing to run without --yes. Re-run with --yes to apply the migration."
-                    );
                     return Ok(());
                 }
 
