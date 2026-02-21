@@ -33,6 +33,9 @@ djour --open today
 # List recent notes
 djour list
 
+# Print journal folder path
+djour folder
+
 # List all tags used in notes
 djour tags
 
@@ -149,6 +152,16 @@ djour config mode
 djour config mode weekly
 djour config editor "code -w"
 ```
+
+### `folder`
+
+Print the journal root folder path.
+
+```bash
+djour folder [--open]
+```
+
+- `--open`: open the journal root folder in configured editor
 
 ### `list`
 

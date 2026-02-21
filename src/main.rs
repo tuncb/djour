@@ -63,6 +63,18 @@ fn run(cli: Cli) -> Result<(), DjourError> {
                 Ok(())
             }
         }
+        Some(Commands::Folder { open }) => {
+            let repo = FileSystemRepository::discover()?;
+
+            if open {
+                let config = repo.load_config()?;
+                let editor = EditorSession::new(config.get_editor());
+                editor.open(repo.root())?;
+            }
+
+            println!("{}", repo.root().display());
+            Ok(())
+        }
         Some(Commands::List {
             from,
             to,

@@ -47,6 +47,13 @@ pub enum Commands {
         list: bool,
     },
 
+    /// Print the journal folder path
+    Folder {
+        /// Open the journal folder in configured editor
+        #[arg(long)]
+        open: bool,
+    },
+
     /// List existing notes
     List {
         /// Start date (inclusive, format: DD-MM-YYYY)
@@ -265,6 +272,28 @@ mod tests {
                 assert!(recursive);
             }
             _ => panic!("Expected tags command"),
+        }
+    }
+
+    #[test]
+    fn parses_folder_command() {
+        let cli = Cli::try_parse_from(["djour", "folder"]).unwrap();
+        match cli.command {
+            Some(super::Commands::Folder { open }) => {
+                assert!(!open);
+            }
+            _ => panic!("Expected folder command"),
+        }
+    }
+
+    #[test]
+    fn parses_folder_command_with_open_flag() {
+        let cli = Cli::try_parse_from(["djour", "folder", "--open"]).unwrap();
+        match cli.command {
+            Some(super::Commands::Folder { open }) => {
+                assert!(open);
+            }
+            _ => panic!("Expected folder command"),
         }
     }
 
