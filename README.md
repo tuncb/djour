@@ -252,6 +252,12 @@ djour mode <MODE> [OPTIONS]
 | `EDITOR` | Preferred editor |
 | `VISUAL` | Fallback editor |
 
+Journal root discovery order:
+
+1. Current working directory (if it contains `.djour`)
+2. `DJOUR_ROOT` (if set; must contain `.djour`)
+3. Walk up from current working directory to find nearest ancestor with `.djour` (only when `DJOUR_ROOT` is not set)
+
 Editor selection order:
 
 1. `EDITOR`

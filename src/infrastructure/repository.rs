@@ -51,10 +51,20 @@ impl FileSystemRepository {
         FileSystemRepository { root }
     }
 
-    /// Discover journal root by walking up from current directory
-    /// First checks DJOUR_ROOT environment variable, then falls back to discovery
+    /// Discover journal root using process context.
+    /// Resolution order:
+    /// 1) Current working directory (if it contains .djour)
+    /// 2) DJOUR_ROOT environment variable
+    /// 3) Walk up ancestors from current working directory
     pub fn discover() -> Result<Self> {
-        // 1. Check DJOUR_ROOT environment variable first
+        let current_dir = std::env::current_dir()?;
+
+        // 1. Prefer current working directory when it is a djour root.
+        if Self::has_djour_dir(&current_dir) {
+            return Ok(FileSystemRepository::new(current_dir));
+        }
+
+        // 2. Check DJOUR_ROOT environment variable.
         if let Ok(root_path) = std::env::var("DJOUR_ROOT") {
             let path = PathBuf::from(root_path);
             if Self::has_djour_dir(&path) {
@@ -68,8 +78,7 @@ impl FileSystemRepository {
             }
         }
 
-        // 2. Fall back to walking up from current directory
-        let current_dir = std::env::current_dir()?;
+        // 3. Fall back to walking up from current directory.
         Self::discover_from(&current_dir)
     }
 
@@ -416,6 +425,24 @@ mod tests {
             } else {
                 std::env::remove_var(self.key);
             }
+        }
+    }
+
+    struct CurrentDirRestore {
+        previous: PathBuf,
+    }
+
+    impl CurrentDirRestore {
+        fn capture() -> std::io::Result<Self> {
+            Ok(Self {
+                previous: std::env::current_dir()?,
+            })
+        }
+    }
+
+    impl Drop for CurrentDirRestore {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.previous);
         }
     }
 
@@ -863,7 +890,10 @@ mod tests {
         let _restore = EnvVarRestore::capture("DJOUR_ROOT");
 
         let temp = TempDir::new().unwrap();
+        let cwd = TempDir::new().unwrap();
         fs::create_dir(temp.path().join(".djour")).unwrap();
+        let _cwd_restore = CurrentDirRestore::capture().unwrap();
+        std::env::set_current_dir(cwd.path()).unwrap();
 
         // Set DJOUR_ROOT
         std::env::set_var("DJOUR_ROOT", temp.path());
@@ -878,6 +908,9 @@ mod tests {
         let _restore = EnvVarRestore::capture("DJOUR_ROOT");
 
         let temp = TempDir::new().unwrap();
+        let cwd = TempDir::new().unwrap();
+        let _cwd_restore = CurrentDirRestore::capture().unwrap();
+        std::env::set_current_dir(cwd.path()).unwrap();
         // No .djour directory
 
         std::env::set_var("DJOUR_ROOT", temp.path());
@@ -897,19 +930,57 @@ mod tests {
     fn test_discover_without_djour_root_env() {
         let _env_lock = env_test_lock().lock().unwrap();
         let _restore = EnvVarRestore::capture("DJOUR_ROOT");
+        let cwd = TempDir::new().unwrap();
+        let _cwd_restore = CurrentDirRestore::capture().unwrap();
+        std::env::set_current_dir(cwd.path()).unwrap();
 
         // Ensure DJOUR_ROOT is not set
         std::env::remove_var("DJOUR_ROOT");
 
-        // This test will fail if run outside a djour directory
-        // but it tests that the code path works when env var is not set
         let result = FileSystemRepository::discover();
 
-        // Either discovers a journal or fails with NotDjourDirectory
         match result {
-            Ok(_) => {}                                 // Found a journal
-            Err(DjourError::NotDjourDirectory(_)) => {} // Expected
-            Err(e) => panic!("Unexpected error: {}", e),
+            Err(DjourError::NotDjourDirectory(path)) => assert_eq!(path, cwd.path()),
+            Ok(repo) => panic!(
+                "Expected NotDjourDirectory, but discovered {}",
+                repo.root.display()
+            ),
+            Err(e) => panic!("Unexpected error type: {}", e),
         }
+    }
+
+    #[test]
+    fn test_discover_prefers_current_dir_over_djour_root_env() {
+        let _env_lock = env_test_lock().lock().unwrap();
+        let _restore = EnvVarRestore::capture("DJOUR_ROOT");
+
+        let current = TempDir::new().unwrap();
+        let env_root = TempDir::new().unwrap();
+        fs::create_dir(current.path().join(".djour")).unwrap();
+        fs::create_dir(env_root.path().join(".djour")).unwrap();
+
+        let _cwd_restore = CurrentDirRestore::capture().unwrap();
+        std::env::set_current_dir(current.path()).unwrap();
+        std::env::set_var("DJOUR_ROOT", env_root.path());
+
+        let repo = FileSystemRepository::discover().unwrap();
+        assert_eq!(repo.root, current.path());
+    }
+
+    #[test]
+    fn test_discover_prefers_current_dir_over_invalid_djour_root_env() {
+        let _env_lock = env_test_lock().lock().unwrap();
+        let _restore = EnvVarRestore::capture("DJOUR_ROOT");
+
+        let current = TempDir::new().unwrap();
+        let invalid_env_root = TempDir::new().unwrap();
+        fs::create_dir(current.path().join(".djour")).unwrap();
+
+        let _cwd_restore = CurrentDirRestore::capture().unwrap();
+        std::env::set_current_dir(current.path()).unwrap();
+        std::env::set_var("DJOUR_ROOT", invalid_env_root.path());
+
+        let repo = FileSystemRepository::discover().unwrap();
+        assert_eq!(repo.root, current.path());
     }
 }

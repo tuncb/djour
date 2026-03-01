@@ -83,3 +83,20 @@ fn test_folder_not_in_djour_directory_fails() {
         .failure()
         .stderr(predicate::str::contains("Not a djour directory"));
 }
+
+#[test]
+fn test_folder_prefers_current_directory_over_invalid_djour_root() {
+    let temp = TempDir::new().unwrap();
+    let bad_root = TempDir::new().unwrap();
+    init_journal(&temp);
+
+    let expected = temp.path().display().to_string();
+
+    djour_cmd()
+        .current_dir(temp.path())
+        .env("DJOUR_ROOT", bad_root.path())
+        .arg("folder")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(expected));
+}
