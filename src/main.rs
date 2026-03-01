@@ -9,6 +9,7 @@ use djour::domain::tags::CompilationFormat;
 use djour::domain::JournalMode;
 use djour::error::DjourError;
 use djour::infrastructure::{EditorSession, FileSystemRepository, JournalRepository};
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 fn main() {
@@ -99,7 +100,7 @@ fn run(cli: Cli) -> Result<(), DjourError> {
             )?;
 
             // Format and print output
-            let output = format_note_list(&notes);
+            let output = format_note_list(&notes, &to_absolute_path(repo.root())?);
             print!("{}", output);
 
             Ok(())
@@ -166,11 +167,7 @@ fn run(cli: Cli) -> Result<(), DjourError> {
                 let editor = EditorSession::new(config.get_editor());
                 editor.open(&output_path)?;
             } else {
-                let printable = output_path
-                    .strip_prefix(repo.root())
-                    .unwrap_or(&output_path)
-                    .to_string_lossy();
-                println!("{}", printable);
+                println!("{}", to_absolute_path(&output_path)?.display());
             }
 
             Ok(())
@@ -247,7 +244,10 @@ fn run(cli: Cli) -> Result<(), DjourError> {
                 // Resolve/create note and print filename
                 let repo = FileSystemRepository::discover()?;
                 let filename = open_note(&repo, &time_ref, cli.open)?;
-                println!("{}", filename);
+                println!(
+                    "{}",
+                    to_absolute_path(&repo.root().join(filename))?.display()
+                );
                 Ok(())
             } else {
                 // No command and no time_ref, show help
@@ -267,4 +267,12 @@ fn parse_cli_date(value: Option<String>) -> Result<Option<NaiveDate>, DjourError
             })
         })
         .transpose()
+}
+
+fn to_absolute_path(path: &Path) -> Result<PathBuf, DjourError> {
+    if path.is_absolute() {
+        Ok(path.to_path_buf())
+    } else {
+        Ok(std::env::current_dir()?.join(path))
+    }
 }

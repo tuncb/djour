@@ -37,6 +37,10 @@ fn test_list_with_notes() {
     fs::write(temp.path().join("2025-01-16.md"), "note 2").unwrap();
     fs::write(temp.path().join("2025-01-15.md"), "note 3").unwrap();
 
+    let day_17 = temp.path().join("2025-01-17.md").display().to_string();
+    let day_16 = temp.path().join("2025-01-16.md").display().to_string();
+    let day_15 = temp.path().join("2025-01-15.md").display().to_string();
+
     // List should show all notes
     djour_cmd()
         .current_dir(temp.path())
@@ -44,8 +48,11 @@ fn test_list_with_notes() {
         .assert()
         .success()
         .stdout(predicate::str::contains("17-01-2025"))
+        .stdout(predicate::str::contains(day_17))
         .stdout(predicate::str::contains("16-01-2025"))
-        .stdout(predicate::str::contains("15-01-2025"));
+        .stdout(predicate::str::contains(day_16))
+        .stdout(predicate::str::contains("15-01-2025"))
+        .stdout(predicate::str::contains(day_15));
 }
 
 #[test]
@@ -285,12 +292,14 @@ fn test_list_single_mode() {
 
     fs::write(temp.path().join("journal.md"), "entry").unwrap();
 
+    let expected_path = temp.path().join("journal.md").display().to_string();
+
     djour_cmd()
         .current_dir(temp.path())
         .arg("list")
         .assert()
         .success()
-        .stdout(predicate::str::contains("journal.md"));
+        .stdout(predicate::str::contains(expected_path));
 }
 
 #[test]
@@ -389,7 +398,19 @@ fn test_list_recursive_includes_nested_notes_and_skips_dot_dirs() {
         .unwrap();
 
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.contains("2025-01-15.md"));
-    assert!(stdout.contains("projects/2025-01-16.md"));
-    assert!(!stdout.contains("2025-01-17.md"));
+    let root_note = temp.path().join("2025-01-15.md").display().to_string();
+    let nested_note = temp
+        .path()
+        .join("projects/2025-01-16.md")
+        .display()
+        .to_string();
+    let hidden_note = temp
+        .path()
+        .join(".hidden/2025-01-17.md")
+        .display()
+        .to_string();
+
+    assert!(stdout.contains(&root_note));
+    assert!(stdout.contains(&nested_note));
+    assert!(!stdout.contains(&hidden_note));
 }

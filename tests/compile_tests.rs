@@ -42,6 +42,8 @@ fn test_compile_single_tag() {
 Meeting at 10am with team. #work",
     );
 
+    let expected_output_path = temp.path().join(".compilations").join("work.md");
+
     // Compile work tag
     djour_cmd()
         .current_dir(temp.path())
@@ -49,10 +51,12 @@ Meeting at 10am with team. #work",
         .arg("work")
         .assert()
         .success()
-        .stdout(predicate::str::contains("work.md"));
+        .stdout(predicate::str::contains(
+            expected_output_path.display().to_string(),
+        ));
 
     // Verify output file created
-    let output = temp.path().join(".compilations/work.md");
+    let output = expected_output_path;
     assert!(output.exists());
 
     // Verify content

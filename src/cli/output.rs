@@ -1,24 +1,26 @@
 //! Output formatting utilities
 
 use crate::infrastructure::NoteEntry;
+use std::path::Path;
 
 /// Format a list of note entries for display
-pub fn format_note_list(notes: &[NoteEntry]) -> String {
+pub fn format_note_list(notes: &[NoteEntry], root: &Path) -> String {
     if notes.is_empty() {
         return "No notes found".to_string();
     }
 
     let mut output = String::new();
     for entry in notes {
+        let full_path = root.join(&entry.filename);
         if let Some(date) = entry.date {
             output.push_str(&format!(
                 "{}  {}\n",
                 date.format("%d-%m-%Y"),
-                entry.filename
+                full_path.display()
             ));
         } else {
             // No date (single mode) - use spacing for alignment
-            output.push_str(&format!("           {}\n", entry.filename));
+            output.push_str(&format!("           {}\n", full_path.display()));
         }
     }
     output
@@ -42,11 +44,12 @@ pub fn format_tag_list(tags: &[String]) -> String {
 mod tests {
     use super::*;
     use chrono::NaiveDate;
+    use std::path::Path;
 
     #[test]
     fn test_format_empty_list() {
         let notes = vec![];
-        let output = format_note_list(&notes);
+        let output = format_note_list(&notes, Path::new("/tmp/journal"));
         assert_eq!(output, "No notes found");
     }
 
@@ -63,19 +66,21 @@ mod tests {
             ),
         ];
 
-        let output = format_note_list(&notes);
-        assert!(output.contains("17-01-2025  2025-01-17.md"));
-        assert!(output.contains("16-01-2025  2025-01-16.md"));
+        let root = Path::new("/tmp/journal");
+        let output = format_note_list(&notes, root);
+        assert!(output.contains("17-01-2025"));
+        assert!(output.contains(&root.join("2025-01-17.md").display().to_string()));
+        assert!(output.contains("16-01-2025"));
+        assert!(output.contains(&root.join("2025-01-16.md").display().to_string()));
     }
 
     #[test]
     fn test_format_single_mode_entry() {
         let notes = vec![NoteEntry::new("journal.md".to_string(), None)];
+        let root = Path::new("/tmp/journal");
 
-        let output = format_note_list(&notes);
-        assert!(output.contains("journal.md"));
-        // Should have spacing for alignment
-        assert!(output.contains("           journal.md"));
+        let output = format_note_list(&notes, root);
+        assert!(output.contains(&root.join("journal.md").display().to_string()));
     }
 
     #[test]
@@ -87,10 +92,12 @@ mod tests {
             ),
             NoteEntry::new("journal.md".to_string(), None),
         ];
+        let root = Path::new("/tmp/journal");
 
-        let output = format_note_list(&notes);
-        assert!(output.contains("17-01-2025  2025-01-17.md"));
-        assert!(output.contains("           journal.md"));
+        let output = format_note_list(&notes, root);
+        assert!(output.contains("17-01-2025"));
+        assert!(output.contains(&root.join("2025-01-17.md").display().to_string()));
+        assert!(output.contains(&root.join("journal.md").display().to_string()));
     }
 
     #[test]

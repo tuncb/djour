@@ -2,6 +2,7 @@
 
 #![allow(deprecated)]
 
+use chrono::Local;
 use predicates::prelude::*;
 use std::fs;
 use tempfile::TempDir;
@@ -129,4 +130,25 @@ fn test_config_get_created_fails() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("Unknown config key: 'created'"));
+}
+
+#[test]
+fn test_time_ref_prints_absolute_note_path() {
+    let temp = TempDir::new().unwrap();
+
+    djour_cmd().arg("init").arg(temp.path()).assert().success();
+
+    let today = Local::now().date_naive();
+    let expected = temp
+        .path()
+        .join(format!("{}.md", today.format("%Y-%m-%d")))
+        .display()
+        .to_string();
+
+    djour_cmd()
+        .current_dir(temp.path())
+        .arg("today")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(expected));
 }
