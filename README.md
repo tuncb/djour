@@ -200,10 +200,14 @@ djour compile <QUERY> [OPTIONS]
 - `-o, --output <PATH>`: output file (default: `.compilations/<tag>.md`)
 - `--from <DATE>`: start date filter (`DD-MM-YYYY`)
 - `--to <DATE>`: end date filter (`DD-MM-YYYY`)
-- `--format <FORMAT>`: `chronological|grouped` (default: `chronological`)
-- `--include-context`: include parent section headings
 - `--open`: open compiled output in editor
 - `--recursive`: search notes recursively (excluding directories starting with `.`)
+
+Compiled markdown is grouped as:
+- `# <date-or-filename>`: section 1, derived from the diary filename
+- `## <diary H2>`: section 2, taken from the nearest level-2 heading in the diary
+
+If a diary file has no level-2 heading, compile synthesizes one using the same text as section 1.
 
 ### `retag`
 

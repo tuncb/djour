@@ -2,10 +2,7 @@
 //!
 //! Orchestrates the full workflow of compiling tagged content from journal entries.
 
-use crate::domain::tags::{
-    CompilationDateStyle, CompilationFormat, TagCompiler, TagParser, TagQuery, TaggedContent,
-};
-use crate::domain::JournalMode;
+use crate::domain::tags::{TagCompiler, TagParser, TagQuery, TaggedContent};
 use crate::error::{DjourError, Result};
 use crate::infrastructure::repository::JournalRepository;
 use crate::infrastructure::FileSystemRepository;
@@ -26,12 +23,6 @@ pub struct CompileOptions {
 
     /// End date filter (inclusive)
     pub to: Option<NaiveDate>,
-
-    /// Output format
-    pub format: CompilationFormat,
-
-    /// Include parent section headings for context
-    pub include_context: bool,
 
     /// Search notes recursively (excluding directories that start with '.')
     pub recursive: bool,
@@ -122,20 +113,7 @@ pub fn compile_tags(repository: &FileSystemRepository, options: CompileOptions) 
     }
 
     // 7. Generate markdown output
-    let date_style = match config.get_mode() {
-        JournalMode::Weekly => CompilationDateStyle::WeekRange,
-        JournalMode::Monthly => CompilationDateStyle::MonthRange,
-        _ => CompilationDateStyle::SingleDate,
-    };
-
-    let markdown = TagCompiler::to_markdown_for_output(
-        filtered,
-        &query,
-        options.format,
-        date_style,
-        options.include_context,
-        output_context,
-    );
+    let markdown = TagCompiler::to_markdown_for_output(filtered, &query, output_context);
 
     // 8. Write output file
     // Convert absolute path to relative for repository.write_note

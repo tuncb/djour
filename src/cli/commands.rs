@@ -90,14 +90,6 @@ pub enum Commands {
         #[arg(long)]
         to: Option<String>,
 
-        /// Output format: chronological, grouped
-        #[arg(long, default_value = "chronological")]
-        format: String,
-
-        /// Include parent section headings for context
-        #[arg(long)]
-        include_context: bool,
-
         /// Open compiled file in configured editor
         #[arg(long)]
         open: bool,
@@ -219,6 +211,18 @@ mod tests {
             Some(super::Commands::Compile { recursive, .. }) => assert!(recursive),
             _ => panic!("Expected compile command"),
         }
+    }
+
+    #[test]
+    fn rejects_removed_compile_format_flag() {
+        let result = Cli::try_parse_from(["djour", "compile", "work", "--format", "grouped"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn rejects_removed_compile_include_context_flag() {
+        let result = Cli::try_parse_from(["djour", "compile", "work", "--include-context"]);
+        assert!(result.is_err());
     }
 
     #[test]

@@ -1,3 +1,5 @@
-# Compilation: #work
+# journal.md
+
+## journal.md
 
 Single stream task. #work #focus

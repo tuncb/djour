@@ -5,7 +5,6 @@ use djour::application::{
     retag_notes, set_config, CompileOptions, ModeMigrationOptions, RetagOptions,
 };
 use djour::cli::{format_note_list, format_tag_list, Cli, Commands};
-use djour::domain::tags::CompilationFormat;
 use djour::domain::JournalMode;
 use djour::error::DjourError;
 use djour::infrastructure::{EditorSession, FileSystemRepository, JournalRepository};
@@ -125,8 +124,6 @@ fn run(cli: Cli) -> Result<(), DjourError> {
             output,
             from,
             to,
-            format,
-            include_context,
             open,
             recursive,
         }) => {
@@ -136,26 +133,12 @@ fn run(cli: Cli) -> Result<(), DjourError> {
             let from_date = parse_cli_date(from)?;
             let to_date = parse_cli_date(to)?;
 
-            // Parse format string
-            let compilation_format = match format.to_lowercase().as_str() {
-                "chronological" => CompilationFormat::Chronological,
-                "grouped" => CompilationFormat::Grouped,
-                _ => {
-                    return Err(DjourError::Config(format!(
-                        "Invalid format: {}. Use 'chronological' or 'grouped'",
-                        format
-                    )))
-                }
-            };
-
             // Create compile options
             let options = CompileOptions {
                 query,
                 output,
                 from: from_date,
                 to: to_date,
-                format: compilation_format,
-                include_context,
                 recursive,
             };
 

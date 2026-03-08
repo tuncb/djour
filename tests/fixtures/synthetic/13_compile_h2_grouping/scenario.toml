@@ -1,0 +1,9 @@
+[[command]]
+args = ["compile", "work"]
+expect_exit = 0
+stdout_contains = ["work.md"]
+
+[[command]]
+args = ["compile", "work AND focus"]
+expect_exit = 0
+stdout_contains = ["work-and-focus.md"]

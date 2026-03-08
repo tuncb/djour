@@ -397,10 +397,12 @@ fn parse_fence_marker(line: &str) -> Option<(char, usize)> {
 }
 
 #[derive(Debug, Clone)]
-struct HeadingSpan {
+struct HeadingInfo {
     level: usize,
     line_start: usize,
     line_end: usize,
+    raw_line: String,
+    raw_text: String,
 }
 
 #[derive(Debug, Clone)]
@@ -410,7 +412,14 @@ struct SectionBody {
     text: String,
 }
 
-fn collect_heading_spans(content: &str) -> Vec<HeadingSpan> {
+fn heading_text_from_line(line: &str, level: usize) -> String {
+    let line = line.trim_end_matches(['\r', '\n']);
+    let trimmed = line.trim_start_matches(' ');
+    let rest = &trimmed[level..];
+    rest.trim_start_matches([' ', '\t']).to_string()
+}
+
+fn collect_heading_infos(content: &str) -> Vec<HeadingInfo> {
     let mut spans = Vec::new();
     let mut offset = 0usize;
     let mut active_fence: Option<(char, usize)> = None;
@@ -436,10 +445,12 @@ fn collect_heading_spans(content: &str) -> Vec<HeadingSpan> {
         if let Some(level) = parse_atx_heading_level(line) {
             let line_start = offset;
             let line_end = offset + line.len();
-            spans.push(HeadingSpan {
+            spans.push(HeadingInfo {
                 level,
                 line_start,
                 line_end,
+                raw_line: line.trim_end_matches(['\r', '\n']).to_string(),
+                raw_text: heading_text_from_line(line, level),
             });
         }
 
@@ -450,7 +461,7 @@ fn collect_heading_spans(content: &str) -> Vec<HeadingSpan> {
 }
 
 fn extract_section_bodies_in_order(content: &str) -> Vec<SectionBody> {
-    let headings = collect_heading_spans(content);
+    let headings = collect_heading_infos(content);
     let mut bodies = Vec::with_capacity(headings.len());
 
     for (idx, heading) in headings.iter().enumerate() {
@@ -545,6 +556,15 @@ pub struct TaggedContent {
 
     /// Raw span payload.
     pub payload: ContentPayload,
+
+    /// Nearest level-2 heading text for compile grouping, including hashtags.
+    pub section_two: Option<String>,
+
+    /// Whether this content appeared before the first level-2 heading in a file that has one.
+    pub before_first_h2: bool,
+
+    /// Original heading line (including leading hashes) for tagged section headings.
+    pub raw_heading_line: Option<String>,
 }
 
 impl TaggedContent {
@@ -566,6 +586,9 @@ impl TaggedContent {
                 span: SourceSpan::new(0, source.len()),
                 source,
             },
+            section_two: None,
+            before_first_h2: false,
+            raw_heading_line: None,
         }
     }
 
@@ -590,6 +613,9 @@ impl TaggedContent {
             date,
             context,
             payload,
+            section_two: None,
+            before_first_h2: false,
+            raw_heading_line: None,
         }
     }
 
@@ -603,6 +629,15 @@ impl TaggedContent {
 
     pub(crate) fn rendered_content_for_output(&self, output_file: Option<&Path>) -> String {
         rewrite_markdown_targets(self.raw_payload_content(), &self.source_file, output_file)
+    }
+
+    pub(crate) fn rendered_heading_line_for_output(
+        &self,
+        output_file: Option<&Path>,
+    ) -> Option<String> {
+        self.raw_heading_line
+            .as_ref()
+            .map(|heading| rewrite_markdown_targets(heading, &self.source_file, output_file))
     }
 
     pub(crate) fn span_gap_to<'a>(&'a self, next: &'a TaggedContent) -> Option<&'a str> {
@@ -651,6 +686,23 @@ impl TaggedContent {
 
         updated
     }
+
+    pub(crate) fn apply_compile_context(
+        &mut self,
+        section_two: Option<String>,
+        before_first_h2: bool,
+        raw_heading_line: Option<String>,
+    ) {
+        self.section_two = section_two;
+        self.before_first_h2 = before_first_h2;
+        self.raw_heading_line = raw_heading_line;
+    }
+
+    pub(crate) fn span_start(&self) -> usize {
+        match &self.payload {
+            ContentPayload::Span { span, .. } => span.start,
+        }
+    }
 }
 
 /// Represents a section in the document hierarchy
@@ -658,6 +710,7 @@ impl TaggedContent {
 struct Section {
     level: usize,
     heading: String,
+    raw_heading_text: String,
     tags: Vec<String>,
 }
 
@@ -673,7 +726,13 @@ impl SectionStack {
     }
 
     /// Enter a new heading, popping sections at same or higher level
-    fn push_heading(&mut self, level: usize, heading: &str, tags: Vec<String>) {
+    fn push_heading(
+        &mut self,
+        level: usize,
+        heading: &str,
+        raw_heading_text: &str,
+        tags: Vec<String>,
+    ) {
         // Pop all sections at the same level or deeper
         self.stack.retain(|s| s.level < level);
 
@@ -681,6 +740,7 @@ impl SectionStack {
         self.stack.push(Section {
             level,
             heading: heading.to_string(),
+            raw_heading_text: raw_heading_text.to_string(),
             tags,
         });
     }
@@ -707,6 +767,15 @@ impl SectionStack {
             heading: s.heading.clone(),
             level: s.level,
         })
+    }
+
+    /// Get the nearest heading level 2 raw text (including tags).
+    fn current_h2_heading(&self) -> Option<String> {
+        self.stack
+            .iter()
+            .rev()
+            .find(|section| section.level == 2)
+            .map(|section| section.raw_heading_text.clone())
     }
 
     /// Whether we are currently inside any section that has explicit heading tags.
@@ -737,7 +806,9 @@ impl TagParser {
         date: Option<NaiveDate>,
         _output_file: Option<&Path>,
     ) -> Vec<TaggedContent> {
+        let heading_infos = collect_heading_infos(content);
         let section_bodies = extract_section_bodies_in_order(content);
+        let file_has_h2 = heading_infos.iter().any(|heading| heading.level == 2);
         let mut results = Vec::new();
         let mut section_stack = SectionStack::new();
         let mut list_tag_stack: Vec<Vec<String>> = Vec::new();
@@ -858,7 +929,7 @@ impl TagParser {
                             span: item_span,
                             source: Arc::clone(&source_arc),
                         };
-                        let item = TaggedContent::with_payload(
+                        let mut item = TaggedContent::with_payload(
                             all_tags,
                             payload,
                             source_file.to_path_buf(),
@@ -866,6 +937,12 @@ impl TagParser {
                             section_stack
                                 .current_context()
                                 .unwrap_or(TagContext::Paragraph),
+                        );
+                        let section_two = section_stack.current_h2_heading();
+                        item.apply_compile_context(
+                            section_two.clone(),
+                            file_has_h2 && section_two.is_none(),
+                            None,
                         );
                         Some(item)
                     } else {
@@ -901,6 +978,10 @@ impl TagParser {
                     // Extract tags from heading
                     let heading_tags = extract_tags(&current_heading_text);
                     let heading_clean = strip_tags(&current_heading_text);
+                    let heading_info = heading_infos
+                        .get(heading_index)
+                        .cloned()
+                        .expect("heading metadata and parser traversal must stay aligned");
                     let section_body = section_bodies
                         .get(heading_index)
                         .cloned()
@@ -911,11 +992,18 @@ impl TagParser {
                     section_stack.push_heading(
                         current_heading_level,
                         &heading_clean,
+                        &heading_info.raw_text,
                         heading_tags.clone(),
                     );
 
+                    // H1 tags should flow down into descendant H2 sections instead of collapsing
+                    // multiple section-two buckets into one large emitted block.
+                    let should_emit_section = !heading_tags.is_empty()
+                        && !section_body.text.trim().is_empty()
+                        && (current_heading_level != 1 || !file_has_h2);
+
                     // For tagged headings, compile the full section body verbatim.
-                    if !heading_tags.is_empty() && !section_body.text.trim().is_empty() {
+                    if should_emit_section {
                         let section_span = SourceSpan::new(section_body.start, section_body.end);
                         let span_text = section_span
                             .slice(content)
@@ -928,7 +1016,7 @@ impl TagParser {
                             span: section_span,
                             source: Arc::clone(&source_arc),
                         };
-                        let tagged = TaggedContent::with_payload(
+                        let mut tagged = TaggedContent::with_payload(
                             section_stack.current_tags(),
                             payload,
                             source_file.to_path_buf(),
@@ -937,6 +1025,12 @@ impl TagParser {
                                 heading: heading_clean,
                                 level: current_heading_level,
                             },
+                        );
+                        let section_two = section_stack.current_h2_heading();
+                        tagged.apply_compile_context(
+                            section_two.clone(),
+                            file_has_h2 && section_two.is_none(),
+                            Some(heading_info.raw_line),
                         );
                         results.push(tagged);
                     }
@@ -1007,7 +1101,7 @@ impl TagParser {
                                 span: paragraph_span,
                                 source: Arc::clone(&source_arc),
                             };
-                            let paragraph = TaggedContent::with_payload(
+                            let mut paragraph = TaggedContent::with_payload(
                                 all_tags,
                                 payload,
                                 source_file.to_path_buf(),
@@ -1015,6 +1109,12 @@ impl TagParser {
                                 section_stack
                                     .current_context()
                                     .unwrap_or(TagContext::Paragraph),
+                            );
+                            let section_two = section_stack.current_h2_heading();
+                            paragraph.apply_compile_context(
+                                section_two.clone(),
+                                file_has_h2 && section_two.is_none(),
+                                None,
                             );
                             results.push(paragraph);
                             pending_code_block_target = Some(results.len() - 1);
@@ -1164,7 +1264,7 @@ impl TagParser {
                                 span: html_span,
                                 source: Arc::clone(&source_arc),
                             };
-                            let html_item = TaggedContent::with_payload(
+                            let mut html_item = TaggedContent::with_payload(
                                 all_tags,
                                 payload,
                                 source_file.to_path_buf(),
@@ -1172,6 +1272,12 @@ impl TagParser {
                                 section_stack
                                     .current_context()
                                     .unwrap_or(TagContext::Paragraph),
+                            );
+                            let section_two = section_stack.current_h2_heading();
+                            html_item.apply_compile_context(
+                                section_two.clone(),
+                                file_has_h2 && section_two.is_none(),
+                                None,
                             );
                             results.push(html_item);
                         }
@@ -1242,7 +1348,7 @@ impl TagParser {
                                 span: code_block_span,
                                 source: Arc::clone(&source_arc),
                             };
-                            let code_block = TaggedContent::with_payload(
+                            let mut code_block = TaggedContent::with_payload(
                                 all_tags,
                                 payload,
                                 source_file.to_path_buf(),
@@ -1250,6 +1356,12 @@ impl TagParser {
                                 section_stack
                                     .current_context()
                                     .unwrap_or(TagContext::Paragraph),
+                            );
+                            let section_two = section_stack.current_h2_heading();
+                            code_block.apply_compile_context(
+                                section_two.clone(),
+                                file_has_h2 && section_two.is_none(),
+                                None,
                             );
                             results.push(code_block);
                         }
@@ -1322,27 +1434,37 @@ mod tests {
         let mut stack = SectionStack::new();
 
         // Push level 1 heading
-        stack.push_heading(1, "Main", vec!["tag1".to_string()]);
+        stack.push_heading(1, "Main", "Main", vec!["tag1".to_string()]);
         assert_eq!(stack.current_tags(), vec!["tag1"]);
 
         // Push level 2 heading - inherits from level 1
-        stack.push_heading(2, "Sub", vec!["tag2".to_string()]);
+        stack.push_heading(2, "Sub", "Sub #tag2", vec!["tag2".to_string()]);
         assert_eq!(stack.current_tags(), vec!["tag1", "tag2"]);
 
         // Push another level 2 - replaces previous level 2
-        stack.push_heading(2, "Sub2", vec!["tag3".to_string()]);
+        stack.push_heading(2, "Sub2", "Sub2 #tag3", vec!["tag3".to_string()]);
         assert_eq!(stack.current_tags(), vec!["tag1", "tag3"]);
 
         // Push level 1 - clears all
-        stack.push_heading(1, "Main2", vec!["tag4".to_string()]);
+        stack.push_heading(1, "Main2", "Main2 #tag4", vec!["tag4".to_string()]);
         assert_eq!(stack.current_tags(), vec!["tag4"]);
     }
 
     #[test]
     fn test_section_stack_deduplication() {
         let mut stack = SectionStack::new();
-        stack.push_heading(1, "Main", vec!["work".to_string(), "urgent".to_string()]);
-        stack.push_heading(2, "Sub", vec!["urgent".to_string(), "meeting".to_string()]);
+        stack.push_heading(
+            1,
+            "Main",
+            "Main #work #urgent",
+            vec!["work".to_string(), "urgent".to_string()],
+        );
+        stack.push_heading(
+            2,
+            "Sub",
+            "Sub #urgent #meeting",
+            vec!["urgent".to_string(), "meeting".to_string()],
+        );
 
         let tags = stack.current_tags();
         assert_eq!(tags, vec!["work", "urgent", "meeting"]); // "urgent" not duplicated
@@ -1405,13 +1527,9 @@ Critical path items.
 
         let results = TagParser::extract_from_markdown(markdown, Path::new("test.md"), None);
 
-        let project = results
-            .iter()
-            .find(|r| {
-                matches!(&r.context, TagContext::Section { heading, .. } if heading == "Project Alpha")
-            })
-            .unwrap();
-        assert_eq!(project.tags, vec!["project-alpha"]);
+        assert!(results.iter().all(|r| {
+            !matches!(&r.context, TagContext::Section { heading, .. } if heading == "Project Alpha")
+        }));
 
         let sprint = results
             .iter()
@@ -1428,6 +1546,12 @@ Critical path items.
             )
             .unwrap();
         assert_eq!(tasks.tags, vec!["project-alpha", "work", "urgent"]);
+
+        let paragraph = results
+            .iter()
+            .find(|r| r.content.contains("Planning for sprint 3."))
+            .unwrap();
+        assert_eq!(paragraph.tags, vec!["project-alpha", "work"]);
     }
 
     #[test]

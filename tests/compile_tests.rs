@@ -61,8 +61,8 @@ Meeting at 10am with team. #work",
 
     // Verify content
     let content = fs::read_to_string(output).unwrap();
-    assert!(content.contains("# Compilation: #work"));
-    assert!(content.contains("## 15-01-2025"));
+    assert!(content.contains("# 15-01-2025"));
+    assert!(content.contains("## Work Notes #work"));
     assert!(content.contains("Meeting at 10am with team"));
     assert!(content.contains("Meeting at 10am with team. #work"));
 }
@@ -237,29 +237,25 @@ fn test_compile_with_date_filtering() {
 }
 
 #[test]
-fn test_compile_format_chronological() {
+fn test_compile_groups_under_date_and_h2() {
     let temp = TempDir::new().unwrap();
     init_journal(&temp);
 
-    // Create test notes
     create_note(&temp, "2025-01-15.md", "## Work #work\nFirst day.");
     create_note(&temp, "2025-01-16.md", "## Work #work\nSecond day.");
 
-    // Compile with chronological format (default)
     djour_cmd()
         .current_dir(temp.path())
         .arg("compile")
         .arg("work")
-        .arg("--format")
-        .arg("chronological")
         .assert()
         .success();
 
-    // Verify output
     let output = temp.path().join(".compilations/work.md");
     let content = fs::read_to_string(output).unwrap();
-    assert!(content.contains("## 15-01-2025"));
-    assert!(content.contains("## 16-01-2025"));
+    assert!(content.contains("# 15-01-2025"));
+    assert!(content.contains("# 16-01-2025"));
+    assert!(content.contains("## Work #work"));
 }
 
 #[test]
@@ -289,7 +285,8 @@ fn test_compile_weekly_date_range() {
 
     let output = temp.path().join(".compilations/work.md");
     let content = fs::read_to_string(output).unwrap();
-    assert!(content.contains("## 13-01-2025 to 19-01-2025"));
+    assert!(content.contains("# 13-01-2025"));
+    assert!(content.contains("## Work #work"));
 }
 
 #[test]
@@ -315,65 +312,64 @@ fn test_compile_monthly_date_range() {
 
     let output = temp.path().join(".compilations/work.md");
     let content = fs::read_to_string(output).unwrap();
-    assert!(content.contains("## 01-02-2025 to 28-02-2025"));
+    assert!(content.contains("# 01-02-2025"));
+    assert!(content.contains("## Work #work"));
 }
 
 #[test]
-fn test_compile_format_grouped() {
+fn test_compile_merges_same_h2_across_files() {
     let temp = TempDir::new().unwrap();
     init_journal(&temp);
 
-    // Create test notes
     create_note(&temp, "2025-01-15.md", "## Work #work\nFirst file.");
-    create_note(&temp, "2025-01-16.md", "## Work #work\nSecond file.");
+    let nested = temp.path().join("nested");
+    fs::create_dir_all(&nested).unwrap();
+    fs::write(nested.join("2025-01-15.md"), "## Work #work\nSecond file.").unwrap();
 
-    // Compile with grouped format
     djour_cmd()
         .current_dir(temp.path())
         .arg("compile")
         .arg("work")
-        .arg("--format")
-        .arg("grouped")
+        .arg("--recursive")
         .assert()
         .success();
 
-    // Verify output
     let output = temp.path().join(".compilations/work.md");
     let content = fs::read_to_string(output).unwrap();
-    assert!(content.contains("## From: 2025-01-15.md"));
-    assert!(content.contains("## From: 2025-01-16.md"));
+    assert_eq!(content.matches("## Work #work").count(), 1);
+    assert!(content.contains("First file."));
+    assert!(content.contains("Second file."));
 }
 
 #[test]
-fn test_compile_with_context() {
+fn test_compile_keeps_intro_before_first_h2() {
     let temp = TempDir::new().unwrap();
     init_journal(&temp);
 
-    // Create test note with sections
     create_note(
         &temp,
         "2025-01-15.md",
-        "# Daily Log
+        "# Daily Log #work
+
+Intro first. #work
 
 ## Work Section #work
 
 Meeting notes here.",
     );
 
-    // Compile with context
     djour_cmd()
         .current_dir(temp.path())
         .arg("compile")
         .arg("work")
-        .arg("--include-context")
         .assert()
         .success();
 
-    // Verify output
     let output = temp.path().join(".compilations/work.md");
     let content = fs::read_to_string(output).unwrap();
-    // Should include section heading with adjusted level
-    assert!(content.contains("Work Section"));
+    let intro_idx = content.find("Intro first. #work").unwrap();
+    let h2_idx = content.find("## Work Section #work").unwrap();
+    assert!(intro_idx < h2_idx);
 }
 
 #[test]
@@ -403,7 +399,8 @@ fn test_compile_custom_output_path() {
     assert!(output.exists());
 
     let content = fs::read_to_string(output).unwrap();
-    assert!(content.contains("# Compilation: #work"));
+    assert!(content.contains("# 15-01-2025"));
+    assert!(content.contains("## Work #work"));
 }
 
 #[test]
@@ -507,26 +504,6 @@ fn test_compile_no_matches_fails() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("No content found matching query"));
-}
-
-#[test]
-fn test_compile_invalid_format_fails() {
-    let temp = TempDir::new().unwrap();
-    init_journal(&temp);
-
-    // Create test note
-    create_note(&temp, "2025-01-15.md", "## Work #work\nSome work.");
-
-    // Try to compile with invalid format
-    djour_cmd()
-        .current_dir(temp.path())
-        .arg("compile")
-        .arg("work")
-        .arg("--format")
-        .arg("invalid")
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("Invalid format"));
 }
 
 #[test]
@@ -825,6 +802,56 @@ fn test_compile_rebases_image_path_inside_tagged_section() {
     let content = fs::read_to_string(output).unwrap();
     assert!(content.contains("![Section Diagram](../images/section-diagram.png)"));
     assert!(!content.contains("![Section Diagram](./images/section-diagram.png)"));
+}
+
+#[test]
+fn test_compile_uses_date_label_as_section_two_when_no_h2_exists() {
+    let temp = TempDir::new().unwrap();
+    init_journal(&temp);
+
+    create_note(&temp, "2025-01-15.md", "Standalone task. #work");
+
+    djour_cmd()
+        .current_dir(temp.path())
+        .arg("compile")
+        .arg("work")
+        .assert()
+        .success();
+
+    let output = temp.path().join(".compilations/work.md");
+    let content = fs::read_to_string(output).unwrap();
+    assert!(content.contains("# 15-01-2025"));
+    assert!(content.contains("## 15-01-2025"));
+    assert!(content.contains("Standalone task. #work"));
+}
+
+#[test]
+fn test_compile_preserves_tagged_subsection_heading_line() {
+    let temp = TempDir::new().unwrap();
+    init_journal(&temp);
+
+    create_note(
+        &temp,
+        "2025-01-15.md",
+        "## Work #work
+
+### Deep focus #work #focus
+
+Important detail. #work #focus",
+    );
+
+    djour_cmd()
+        .current_dir(temp.path())
+        .arg("compile")
+        .arg("work")
+        .assert()
+        .success();
+
+    let output = temp.path().join(".compilations/work.md");
+    let content = fs::read_to_string(output).unwrap();
+    assert!(content.contains("## Work #work"));
+    assert!(content.contains("### Deep focus #work #focus"));
+    assert!(content.contains("Important detail. #work #focus"));
 }
 
 #[test]
