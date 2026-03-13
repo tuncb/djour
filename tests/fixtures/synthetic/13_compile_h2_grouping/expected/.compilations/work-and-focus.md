@@ -1,4 +1,4 @@
-# 15-01-2025
+# January 15, 2025
 
 ## Work Section #work
 

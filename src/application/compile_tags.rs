@@ -3,6 +3,7 @@
 //! Orchestrates the full workflow of compiling tagged content from journal entries.
 
 use crate::domain::tags::{TagCompiler, TagParser, TagQuery, TaggedContent};
+use crate::domain::{load_template, JournalMode, Template};
 use crate::error::{DjourError, Result};
 use crate::infrastructure::repository::JournalRepository;
 use crate::infrastructure::FileSystemRepository;
@@ -45,6 +46,8 @@ pub fn compile_tags(repository: &FileSystemRepository, options: CompileOptions) 
 
     // 2. Load config to get mode
     let config = repository.load_config()?;
+    let mode = config.get_mode();
+    let section_one_template = load_section_one_template(repository.root(), mode)?;
 
     // 3. Determine output path
     let output_path = if let Some(path) = options.output.clone() {
@@ -65,7 +68,7 @@ pub fn compile_tags(repository: &FileSystemRepository, options: CompileOptions) 
 
     // 4. List all note files (with date filters)
     let notes = repository.list_notes(
-        config.get_mode(),
+        mode,
         options.from,
         options.to,
         None, // No limit - get all notes
@@ -99,7 +102,13 @@ pub fn compile_tags(repository: &FileSystemRepository, options: CompileOptions) 
             output_context,
         );
 
-        all_content.extend(tagged);
+        let section_one =
+            section_one_label_for_note(section_one_template.as_ref(), mode, note.date, &file_path);
+
+        all_content.extend(tagged.into_iter().map(|mut item| {
+            item.section_one = section_one.clone();
+            item
+        }));
     }
 
     // 6. Filter by query
@@ -130,6 +139,45 @@ pub fn compile_tags(repository: &FileSystemRepository, options: CompileOptions) 
     Ok(output_path)
 }
 
+fn load_section_one_template(
+    repo_root: &std::path::Path,
+    mode: JournalMode,
+) -> Result<Option<Template>> {
+    if matches!(mode, JournalMode::Single) {
+        return Ok(None);
+    }
+
+    load_template(repo_root, mode.template_name()).map(Some)
+}
+
+fn section_one_label_for_note(
+    template: Option<&Template>,
+    mode: JournalMode,
+    date: Option<NaiveDate>,
+    file_path: &std::path::Path,
+) -> Option<String> {
+    if !matches!(mode, JournalMode::Single) {
+        if let (Some(template), Some(date)) = (template, date) {
+            if let Some(label) = template.rendered_first_h1(date) {
+                return Some(label);
+            }
+
+            return Some(date.format("%d-%m-%Y").to_string());
+        }
+    }
+
+    let fallback = file_path
+        .to_string_lossy()
+        .replace('\\', "/")
+        .trim()
+        .to_string();
+    if fallback.is_empty() {
+        None
+    } else {
+        Some(fallback)
+    }
+}
+
 /// Sanitize query string for use as filename
 ///
 /// Converts spaces to hyphens, keeps alphanumeric characters and hyphens/underscores,
@@ -150,6 +198,8 @@ fn sanitize_filename(query: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::JournalMode;
+    use std::path::Path;
 
     #[test]
     fn test_sanitize_filename() {
@@ -177,6 +227,29 @@ mod tests {
     fn test_sanitize_filename_special_chars() {
         assert_eq!(sanitize_filename("work!urgent"), "work_urgent");
         assert_eq!(sanitize_filename("work(test)"), "work_test");
+    }
+
+    #[test]
+    fn test_section_one_label_for_daily_note_uses_rendered_template_header() {
+        let template = Template::from_builtin("daily.md").unwrap();
+        let date = NaiveDate::from_ymd_opt(2025, 1, 17).unwrap();
+
+        let label = section_one_label_for_note(
+            Some(&template),
+            JournalMode::Daily,
+            Some(date),
+            Path::new("2025-01-17.md"),
+        );
+
+        assert_eq!(label.as_deref(), Some("January 17, 2025"));
+    }
+
+    #[test]
+    fn test_section_one_label_for_single_note_falls_back_to_filename() {
+        let label =
+            section_one_label_for_note(None, JournalMode::Single, None, Path::new("journal.md"));
+
+        assert_eq!(label.as_deref(), Some("journal.md"));
     }
 
     // Integration tests would require setting up a FileSystemRepository with temp directories

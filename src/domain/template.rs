@@ -105,6 +105,35 @@ impl Template {
 
         result
     }
+
+    /// Render template and return the first level-1 heading text, if present.
+    pub fn rendered_first_h1(&self, date: NaiveDate) -> Option<String> {
+        first_h1_text(&self.render(date))
+    }
+}
+
+fn first_h1_text(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim_start_matches(' ');
+        let leading_spaces = line.len().saturating_sub(trimmed.len());
+        if leading_spaces > 3 {
+            continue;
+        }
+
+        let level = trimmed.chars().take_while(|c| *c == '#').count();
+        if level != 1 {
+            continue;
+        }
+
+        let rest = &trimmed[level..];
+        if !rest.starts_with(' ') && !rest.starts_with('\t') {
+            continue;
+        }
+
+        return Some(rest.trim_start_matches([' ', '\t']).to_string());
+    }
+
+    None
 }
 
 /// Load template from custom location or fall back to built-in
@@ -243,6 +272,31 @@ mod tests {
         // No custom template, should load built-in
         let template = load_template(temp.path(), "daily.md").unwrap();
         assert!(template.content.contains("# {DATE}"));
+    }
+
+    #[test]
+    fn test_rendered_first_h1_uses_rendered_content() {
+        let template = Template::from_builtin("weekly.md").unwrap();
+        let date = NaiveDate::from_ymd_opt(2025, 1, 17).unwrap();
+
+        let heading = template.rendered_first_h1(date).unwrap();
+
+        assert_eq!(
+            heading,
+            "Week 03, 2025 (January 13, 2025 - January 19, 2025)"
+        );
+    }
+
+    #[test]
+    fn test_rendered_first_h1_skips_non_heading_lines() {
+        let template = Template {
+            content: "---\n\n# {DATE}\n\nBody".to_string(),
+        };
+        let date = NaiveDate::from_ymd_opt(2025, 1, 17).unwrap();
+
+        let heading = template.rendered_first_h1(date).unwrap();
+
+        assert_eq!(heading, "January 17, 2025");
     }
 
     #[test]

@@ -61,7 +61,7 @@ Meeting at 10am with team. #work",
 
     // Verify content
     let content = fs::read_to_string(output).unwrap();
-    assert!(content.contains("# 15-01-2025"));
+    assert!(content.contains("# January 15, 2025"));
     assert!(content.contains("## Work Notes #work"));
     assert!(content.contains("Meeting at 10am with team"));
     assert!(content.contains("Meeting at 10am with team. #work"));
@@ -253,8 +253,8 @@ fn test_compile_groups_under_date_and_h2() {
 
     let output = temp.path().join(".compilations/work.md");
     let content = fs::read_to_string(output).unwrap();
-    assert!(content.contains("# 15-01-2025"));
-    assert!(content.contains("# 16-01-2025"));
+    assert!(content.contains("# January 15, 2025"));
+    assert!(content.contains("# January 16, 2025"));
     assert!(content.contains("## Work #work"));
 }
 
@@ -285,7 +285,7 @@ fn test_compile_weekly_date_range() {
 
     let output = temp.path().join(".compilations/work.md");
     let content = fs::read_to_string(output).unwrap();
-    assert!(content.contains("# 13-01-2025"));
+    assert!(content.contains("# Week 03, 2025 (January 13, 2025 - January 19, 2025)"));
     assert!(content.contains("## Work #work"));
 }
 
@@ -312,7 +312,7 @@ fn test_compile_monthly_date_range() {
 
     let output = temp.path().join(".compilations/work.md");
     let content = fs::read_to_string(output).unwrap();
-    assert!(content.contains("# 01-02-2025"));
+    assert!(content.contains("# February 2025"));
     assert!(content.contains("## Work #work"));
 }
 
@@ -399,7 +399,7 @@ fn test_compile_custom_output_path() {
     assert!(output.exists());
 
     let content = fs::read_to_string(output).unwrap();
-    assert!(content.contains("# 15-01-2025"));
+    assert!(content.contains("# January 15, 2025"));
     assert!(content.contains("## Work #work"));
 }
 
@@ -820,8 +820,8 @@ fn test_compile_uses_date_label_as_section_two_when_no_h2_exists() {
 
     let output = temp.path().join(".compilations/work.md");
     let content = fs::read_to_string(output).unwrap();
-    assert!(content.contains("# 15-01-2025"));
-    assert!(content.contains("## 15-01-2025"));
+    assert!(content.contains("# January 15, 2025"));
+    assert!(content.contains("## January 15, 2025"));
     assert!(content.contains("Standalone task. #work"));
 }
 

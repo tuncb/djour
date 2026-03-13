@@ -557,6 +557,9 @@ pub struct TaggedContent {
     /// Raw span payload.
     pub payload: ContentPayload,
 
+    /// Section-one label override for compile output.
+    pub section_one: Option<String>,
+
     /// Nearest level-2 heading text for compile grouping, including hashtags.
     pub section_two: Option<String>,
 
@@ -586,6 +589,7 @@ impl TaggedContent {
                 span: SourceSpan::new(0, source.len()),
                 source,
             },
+            section_one: None,
             section_two: None,
             before_first_h2: false,
             raw_heading_line: None,
@@ -613,6 +617,7 @@ impl TaggedContent {
             date,
             context,
             payload,
+            section_one: None,
             section_two: None,
             before_first_h2: false,
             raw_heading_line: None,
@@ -689,10 +694,12 @@ impl TaggedContent {
 
     pub(crate) fn apply_compile_context(
         &mut self,
+        section_one: Option<String>,
         section_two: Option<String>,
         before_first_h2: bool,
         raw_heading_line: Option<String>,
     ) {
+        self.section_one = section_one;
         self.section_two = section_two;
         self.before_first_h2 = before_first_h2;
         self.raw_heading_line = raw_heading_line;
@@ -940,6 +947,7 @@ impl TagParser {
                         );
                         let section_two = section_stack.current_h2_heading();
                         item.apply_compile_context(
+                            None,
                             section_two.clone(),
                             file_has_h2 && section_two.is_none(),
                             None,
@@ -1028,6 +1036,7 @@ impl TagParser {
                         );
                         let section_two = section_stack.current_h2_heading();
                         tagged.apply_compile_context(
+                            None,
                             section_two.clone(),
                             file_has_h2 && section_two.is_none(),
                             Some(heading_info.raw_line),
@@ -1112,6 +1121,7 @@ impl TagParser {
                             );
                             let section_two = section_stack.current_h2_heading();
                             paragraph.apply_compile_context(
+                                None,
                                 section_two.clone(),
                                 file_has_h2 && section_two.is_none(),
                                 None,
@@ -1275,6 +1285,7 @@ impl TagParser {
                             );
                             let section_two = section_stack.current_h2_heading();
                             html_item.apply_compile_context(
+                                None,
                                 section_two.clone(),
                                 file_has_h2 && section_two.is_none(),
                                 None,
@@ -1359,6 +1370,7 @@ impl TagParser {
                             );
                             let section_two = section_stack.current_h2_heading();
                             code_block.apply_compile_context(
+                                None,
                                 section_two.clone(),
                                 file_has_h2 && section_two.is_none(),
                                 None,

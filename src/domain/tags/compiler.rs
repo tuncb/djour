@@ -197,6 +197,10 @@ impl TagCompiler {
     }
 
     fn section_one_label(item: &TaggedContent) -> String {
+        if let Some(label) = &item.section_one {
+            return label.clone();
+        }
+
         match item.date {
             Some(date) => date.format("%d-%m-%Y").to_string(),
             None => {
@@ -331,10 +335,12 @@ mod tests {
 
     fn with_section_two(
         mut item: TaggedContent,
+        section_one: Option<&str>,
         section_two: Option<&str>,
         before_first_h2: bool,
     ) -> TaggedContent {
         item.apply_compile_context(
+            section_one.map(|value| value.to_string()),
             section_two.map(|value| value.to_string()),
             before_first_h2,
             None,
@@ -388,6 +394,7 @@ mod tests {
             3,
         );
         section.apply_compile_context(
+            None,
             Some("Work #work".to_string()),
             false,
             Some("### Deep focus #work #focus".to_string()),
@@ -456,10 +463,12 @@ mod tests {
             with_section_two(
                 create_test_content(vec!["work"], "Intro #work", "2025-01-15.md", date),
                 None,
+                None,
                 true,
             ),
             with_section_two(
                 create_test_content(vec!["work"], "Work body #work", "2025-01-15.md", date),
+                None,
                 Some("Work #work"),
                 false,
             ),
@@ -503,6 +512,7 @@ mod tests {
             3,
         );
         content.apply_compile_context(
+            None,
             Some("Work #work".to_string()),
             false,
             Some("### Deep Task #work #focus".to_string()),
@@ -522,6 +532,7 @@ mod tests {
         let content = vec![
             with_section_two(
                 create_test_content(vec!["work"], "First file #work", "2025-01-15.md", date),
+                None,
                 Some("Work #work"),
                 false,
             ),
@@ -532,6 +543,7 @@ mod tests {
                     "nested/2025-01-15.md",
                     date,
                 ),
+                None,
                 Some("Work #work"),
                 false,
             ),
@@ -543,6 +555,23 @@ mod tests {
         assert_eq!(markdown.matches("## Work #work").count(), 1);
         assert!(markdown.contains("First file #work"));
         assert!(markdown.contains("Second file #work"));
+    }
+
+    #[test]
+    fn test_to_markdown_uses_section_one_override_when_present() {
+        let date = NaiveDate::from_ymd_opt(2025, 1, 15);
+        let content = vec![with_section_two(
+            create_test_content(vec!["work"], "Standalone #work", "2025-01-15.md", date),
+            Some("January 15, 2025"),
+            None,
+            false,
+        )];
+
+        let query = TagQuery::parse("work").unwrap();
+        let markdown = TagCompiler::to_markdown(content, &query);
+
+        assert!(markdown.contains("# January 15, 2025"));
+        assert!(markdown.contains("## January 15, 2025"));
     }
 
     #[test]
@@ -567,16 +596,19 @@ mod tests {
         let content = vec![
             with_section_two(
                 create_test_content(vec!["work"], "- bla", "2025-01-15.md", date),
+                None,
                 Some("Work #work"),
                 false,
             ),
             with_section_two(
                 create_test_content(vec!["work"], "- bla1", "2025-01-15.md", date),
+                None,
                 Some("Work #work"),
                 false,
             ),
             with_section_two(
                 create_test_content(vec!["work"], "- bla2", "2025-01-15.md", date),
+                None,
                 Some("Work #work"),
                 false,
             ),
@@ -604,6 +636,7 @@ mod tests {
                     "2025-01-15.md",
                     date,
                 ),
+                None,
                 Some("Work #work"),
                 false,
             ),
@@ -615,6 +648,7 @@ mod tests {
                     "2025-01-15.md",
                     date,
                 ),
+                None,
                 Some("Work #work"),
                 false,
             ),

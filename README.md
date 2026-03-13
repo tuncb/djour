@@ -204,7 +204,7 @@ djour compile <QUERY> [OPTIONS]
 - `--recursive`: search notes recursively (excluding directories starting with `.`)
 
 Compiled markdown is grouped as:
-- `# <date-or-filename>`: section 1, derived from the diary filename
+- `# <default note header>`: section 1, derived from the mode/template used to create a new diary entry for that note date; if unavailable, falls back to a date-or-filename label
 - `## <diary H2>`: section 2, taken from the nearest level-2 heading in the diary
 
 If a diary file has no level-2 heading, compile synthesizes one using the same text as section 1.
