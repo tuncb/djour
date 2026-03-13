@@ -1,9 +1,10 @@
 # Changelog
 
-## [v0.5.0]
+## [v0.5.1]
 
-- `compile` now groups output into two levels: section 1 comes from the diary filename or date, and
-  section 2 comes from the nearest level-2 heading in the source note.
+- `compile` now groups output into two levels: section 1 uses the note's default generated header,
+  based on the active mode/template; if no generated header is available, it falls back to a date or
+  filename label, and section 2 comes from the nearest level-2 heading in the source note.
 
 ## [v0.4.2]
 
