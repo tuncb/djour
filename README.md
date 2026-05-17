@@ -209,6 +209,8 @@ Compiled markdown is grouped as:
 
 If a diary file has no level-2 heading, compile synthesizes one using the same text as section 1.
 
+Each compiled item is preceded by a source link back to the original note and line number.
+
 ### `retag`
 
 Convert one tag to another across notes.

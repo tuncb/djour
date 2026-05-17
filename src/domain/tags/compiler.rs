@@ -184,16 +184,20 @@ impl TagCompiler {
 
     fn render_item(item: &TaggedContent, output_file: Option<&Path>) -> String {
         let body = item.rendered_content_for_output(output_file);
+        let source_link = format!("_{}_\n\n", item.source_link_for_output(output_file));
 
-        match &item.context {
+        let rendered_body = match &item.context {
             TagContext::Section { level, .. } if *level >= 3 => {
                 if let Some(raw_heading) = item.rendered_heading_line_for_output(output_file) {
-                    return format!("{}\n\n{}", raw_heading, body);
+                    format!("{}\n\n{}", raw_heading, body)
+                } else {
+                    body
                 }
-                body
             }
             _ => body,
-        }
+        };
+
+        format!("{}{}", source_link, rendered_body)
     }
 
     fn section_one_label(item: &TaggedContent) -> String {
@@ -225,52 +229,18 @@ impl TagCompiler {
         }
 
         if let Some(gap) = items[idx].span_gap_to(&items[idx + 1]) {
-            return gap.to_string();
+            return Self::separator_before_next_source_link(gap);
         }
 
-        if Self::should_keep_tight_spacing(&items[idx], &items[idx + 1]) {
-            "\n".to_string()
+        "\n\n".to_string()
+    }
+
+    fn separator_before_next_source_link(gap: &str) -> String {
+        if gap.bytes().filter(|byte| *byte == b'\n').count() >= 2 {
+            gap.to_string()
         } else {
             "\n\n".to_string()
         }
-    }
-
-    fn should_keep_tight_spacing(current: &TaggedContent, next: &TaggedContent) -> bool {
-        current.source_file == next.source_file
-            && current.date == next.date
-            && matches!(current.context, TagContext::Paragraph)
-            && matches!(next.context, TagContext::Paragraph)
-            && Self::looks_like_list_item(current.raw_payload_content())
-            && Self::looks_like_list_item(next.raw_payload_content())
-    }
-
-    fn looks_like_list_item(content: &str) -> bool {
-        let first_non_empty = content
-            .lines()
-            .find(|line| !line.trim().is_empty())
-            .unwrap_or_default()
-            .trim_start();
-
-        if first_non_empty.starts_with("- ")
-            || first_non_empty.starts_with("* ")
-            || first_non_empty.starts_with("+ ")
-        {
-            return true;
-        }
-
-        let mut chars = first_non_empty.chars().peekable();
-        let mut has_digit = false;
-
-        while matches!(chars.peek(), Some(c) if c.is_ascii_digit()) {
-            has_digit = true;
-            chars.next();
-        }
-
-        if !has_digit {
-            return false;
-        }
-
-        matches!(chars.next(), Some('.' | ')')) && matches!(chars.next(), Some(' '))
     }
 }
 
@@ -478,8 +448,11 @@ mod tests {
         let markdown = TagCompiler::to_markdown(content, &query);
 
         assert!(markdown.contains("# 15-01-2025"));
+        assert!(markdown.contains("_[source: 2025-01-15.md:1](2025-01-15.md#L1)_"));
         assert!(markdown.contains("Intro #work\n\n## Work #work"));
-        assert!(markdown.contains("## Work #work\n\nWork body #work"));
+        assert!(markdown.contains(
+            "## Work #work\n\n_[source: 2025-01-15.md:1](2025-01-15.md#L1)_\n\nWork body #work"
+        ));
     }
 
     #[test]
@@ -497,6 +470,7 @@ mod tests {
 
         assert!(markdown.contains("# 15-01-2025"));
         assert!(markdown.contains("## 15-01-2025"));
+        assert!(markdown.contains("_[source: 2025-01-15.md:1](2025-01-15.md#L1)_"));
         assert!(markdown.contains("Standalone #work"));
     }
 
@@ -522,8 +496,38 @@ mod tests {
         let markdown = TagCompiler::to_markdown(vec![content], &query);
 
         assert!(markdown.contains("## Work #work"));
+        assert!(markdown.contains("_[source: 2025-01-15.md:1](2025-01-15.md#L1)_"));
         assert!(markdown.contains("### Deep Task #work #focus"));
         assert!(markdown.contains("Deep task body. #work #focus"));
+    }
+
+    #[test]
+    fn test_to_markdown_source_link_uses_output_relative_path_and_line_number() {
+        let date = NaiveDate::from_ymd_opt(2025, 1, 15);
+        let source: Arc<str> = Arc::from("alpha\n\nbeta #work");
+        let beta_start = source.find("beta").unwrap();
+        let content = vec![with_section_two(
+            create_test_span_content(
+                vec!["work"],
+                Arc::clone(&source),
+                SourceSpan::new(beta_start, source.len()),
+                "notes/2025-01-15.md",
+                date,
+            ),
+            None,
+            Some("Work #work"),
+            false,
+        )];
+
+        let query = TagQuery::parse("work").unwrap();
+        let markdown = TagCompiler::to_markdown_for_output(
+            content,
+            &query,
+            Some(Path::new(".compilations/work.md")),
+        );
+
+        assert!(markdown.contains("_[source: notes/2025-01-15.md:3](../notes/2025-01-15.md#L3)_"));
+        assert!(markdown.contains("beta #work"));
     }
 
     #[test]
@@ -591,7 +595,7 @@ mod tests {
     }
 
     #[test]
-    fn test_to_markdown_keeps_tight_spacing_for_list_items() {
+    fn test_to_markdown_separates_source_links_between_list_items() {
         let date = NaiveDate::from_ymd_opt(2025, 1, 15);
         let content = vec![
             with_section_two(
@@ -617,13 +621,14 @@ mod tests {
         let query = TagQuery::parse("work").unwrap();
         let markdown = TagCompiler::to_markdown(content, &query);
 
-        assert!(markdown.contains("- bla\n- bla1\n- bla2"));
-        assert!(!markdown.contains("- bla\n\n- bla1"));
-        assert!(!markdown.contains("- bla1\n\n- bla2"));
+        assert!(markdown.contains("_[source: 2025-01-15.md:1](2025-01-15.md#L1)_\n\n- bla"));
+        assert!(markdown.contains("_[source: 2025-01-15.md:1](2025-01-15.md#L1)_\n\n- bla1"));
+        assert!(markdown.contains("_[source: 2025-01-15.md:1](2025-01-15.md#L1)_\n\n- bla2"));
+        assert!(markdown.contains("- bla\n\n_[source: 2025-01-15.md:1](2025-01-15.md#L1)_"));
     }
 
     #[test]
-    fn test_to_markdown_keeps_source_gap_for_adjacent_spans() {
+    fn test_to_markdown_expands_tight_source_gap_before_source_links() {
         let date = NaiveDate::from_ymd_opt(2025, 1, 15);
         let source: Arc<str> = Arc::from("* first\n* second");
         let second_start = source.find("* second").unwrap();
@@ -657,7 +662,8 @@ mod tests {
         let query = TagQuery::parse("work").unwrap();
         let markdown = TagCompiler::to_markdown(content, &query);
 
-        assert!(markdown.contains("* first\n* second"));
-        assert!(!markdown.contains("* first\n\n* second"));
+        assert!(markdown.contains("_[source: 2025-01-15.md:1](2025-01-15.md#L1)_\n\n* first"));
+        assert!(markdown.contains("_[source: 2025-01-15.md:2](2025-01-15.md#L2)_\n\n* second"));
+        assert!(markdown.contains("* first\n\n_[source: 2025-01-15.md:2](2025-01-15.md#L2)_"));
     }
 }

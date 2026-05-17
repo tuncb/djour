@@ -650,7 +650,7 @@ fn test_compile_list_item_with_fenced_code_block() {
 }
 
 #[test]
-fn test_compile_tagged_list_from_paragraph_keeps_tight_spacing() {
+fn test_compile_tagged_list_from_paragraph_includes_source_links() {
     let temp = TempDir::new().unwrap();
     init_journal(&temp);
 
@@ -673,9 +673,9 @@ fn test_compile_tagged_list_from_paragraph_keeps_tight_spacing() {
 
     let output = temp.path().join(".compilations/work.md");
     let content = fs::read_to_string(output).unwrap();
-    assert!(content.contains("- bla\n- bla1\n- bla2"));
-    assert!(!content.contains("- bla\n\n- bla1"));
-    assert!(!content.contains("- bla1\n\n- bla2"));
+    assert!(content.contains("_[source: 2025-01-15.md:2](../2025-01-15.md#L2)_\n\n- bla"));
+    assert!(content.contains("_[source: 2025-01-15.md:3](../2025-01-15.md#L3)_\n\n- bla1"));
+    assert!(content.contains("_[source: 2025-01-15.md:4](../2025-01-15.md#L4)_\n\n- bla2"));
 }
 
 #[test]
@@ -701,7 +701,8 @@ fn test_compile_preserves_original_list_marker_style() {
 
     let output = temp.path().join(".compilations/work.md");
     let content = fs::read_to_string(output).unwrap();
-    assert!(content.contains("* alpha\n* beta"));
+    assert!(content.contains("_[source: 2025-01-15.md:2](../2025-01-15.md#L2)_\n\n* alpha"));
+    assert!(content.contains("_[source: 2025-01-15.md:3](../2025-01-15.md#L3)_\n\n* beta"));
     assert!(!content.contains("- alpha"));
 }
 

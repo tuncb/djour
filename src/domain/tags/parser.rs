@@ -174,6 +174,17 @@ fn relative_path(from: &Path, to: &Path) -> Option<PathBuf> {
     Some(rel)
 }
 
+fn markdown_link_destination(destination: &str) -> String {
+    if destination
+        .chars()
+        .any(|c| c.is_whitespace() || matches!(c, '(' | ')'))
+    {
+        format!("<{}>", destination)
+    } else {
+        destination.to_string()
+    }
+}
+
 fn rewrite_link_target(target: &str, source_file: &Path, output_file: Option<&Path>) -> String {
     let Some(output_file) = output_file else {
         return target.to_string();
@@ -568,6 +579,9 @@ pub struct TaggedContent {
 
     /// Original heading line (including leading hashes) for tagged section headings.
     pub raw_heading_line: Option<String>,
+
+    /// Source byte offset used for source links.
+    pub source_start: usize,
 }
 
 impl TaggedContent {
@@ -593,6 +607,7 @@ impl TaggedContent {
             section_two: None,
             before_first_h2: false,
             raw_heading_line: None,
+            source_start: 0,
         }
     }
 
@@ -603,6 +618,9 @@ impl TaggedContent {
         date: Option<NaiveDate>,
         context: TagContext,
     ) -> Self {
+        let source_start = match &payload {
+            ContentPayload::Span { span, .. } => span.start,
+        };
         let content = match &payload {
             ContentPayload::Span { span, source } => span
                 .slice(source)
@@ -621,6 +639,7 @@ impl TaggedContent {
             section_two: None,
             before_first_h2: false,
             raw_heading_line: None,
+            source_start,
         }
     }
 
@@ -643,6 +662,36 @@ impl TaggedContent {
         self.raw_heading_line
             .as_ref()
             .map(|heading| rewrite_markdown_targets(heading, &self.source_file, output_file))
+    }
+
+    pub(crate) fn source_line_number(&self) -> usize {
+        let ContentPayload::Span { source, .. } = &self.payload;
+        let source_start = self.source_start.min(source.len());
+        source[..source_start]
+            .bytes()
+            .filter(|byte| *byte == b'\n')
+            .count()
+            + 1
+    }
+
+    pub(crate) fn source_link_for_output(&self, output_file: Option<&Path>) -> String {
+        let line = self.source_line_number();
+        let label_path = self.source_file.to_string_lossy().replace('\\', "/");
+        let target_path = if let Some(output_file) = output_file {
+            let output_dir = output_file.parent().unwrap_or_else(|| Path::new(""));
+            relative_path(output_dir, &self.source_file).unwrap_or_else(|| self.source_file.clone())
+        } else {
+            self.source_file.clone()
+        };
+        let mut destination = target_path.to_string_lossy().replace('\\', "/");
+        destination.push_str(&format!("#L{}", line));
+
+        format!(
+            "[source: {}:{}]({})",
+            label_path,
+            line,
+            markdown_link_destination(&destination)
+        )
     }
 
     pub(crate) fn span_gap_to<'a>(&'a self, next: &'a TaggedContent) -> Option<&'a str> {
@@ -690,6 +739,10 @@ impl TaggedContent {
         }
 
         updated
+    }
+
+    pub(crate) fn set_source_start(&mut self, source_start: usize) {
+        self.source_start = source_start;
     }
 
     pub(crate) fn apply_compile_context(
@@ -1034,6 +1087,7 @@ impl TagParser {
                                 level: current_heading_level,
                             },
                         );
+                        tagged.set_source_start(heading_info.line_start);
                         let section_two = section_stack.current_h2_heading();
                         tagged.apply_compile_context(
                             None,
@@ -1955,6 +2009,37 @@ Some content under the heading.
             span.slice(source).unwrap_or_default(),
             "Paragraph with [Link](./docs/design.md). #work"
         );
+    }
+
+    #[test]
+    fn test_source_line_number_counts_crlf_lines() {
+        let source: Arc<str> = Arc::from("alpha\r\nbeta #work");
+        let beta_start = source.find("beta").unwrap();
+        let item = TaggedContent::with_payload(
+            vec!["work".to_string()],
+            ContentPayload::Span {
+                span: SourceSpan::new(beta_start, source.len()),
+                source,
+            },
+            PathBuf::from("test.md"),
+            None,
+            TagContext::Paragraph,
+        );
+
+        assert_eq!(item.source_line_number(), 2);
+    }
+
+    #[test]
+    fn test_tagged_section_source_line_points_to_heading() {
+        let markdown = "# Daily\n\n### Deep Focus #work\n\nImportant detail.\n";
+        let results = TagParser::extract_from_markdown(markdown, Path::new("test.md"), None);
+
+        assert_eq!(results.len(), 1);
+        assert!(matches!(
+            results[0].context,
+            TagContext::Section { level: 3, .. }
+        ));
+        assert_eq!(results[0].source_line_number(), 3);
     }
 
     #[test]
