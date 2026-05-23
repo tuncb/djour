@@ -763,6 +763,12 @@ impl TaggedContent {
             ContentPayload::Span { span, .. } => span.start,
         }
     }
+
+    pub(crate) fn span_end(&self) -> usize {
+        match &self.payload {
+            ContentPayload::Span { span, .. } => span.end,
+        }
+    }
 }
 
 /// Represents a section in the document hierarchy

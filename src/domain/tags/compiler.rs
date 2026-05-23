@@ -95,7 +95,7 @@ impl TagCompiler {
             return "*No matching content found.*\n".to_string();
         }
 
-        let sorted = Self::sort_for_render(content);
+        let sorted = Self::coalesce_adjacent_list_items(Self::sort_for_render(content));
         let mut output = String::new();
         let mut current_section_one_key: Option<(Option<NaiveDate>, String)> = None;
         let mut current_group = SectionOneGroup::default();
@@ -198,6 +198,72 @@ impl TagCompiler {
         };
 
         format!("{}{}", source_link, rendered_body)
+    }
+
+    fn coalesce_adjacent_list_items(content: Vec<TaggedContent>) -> Vec<TaggedContent> {
+        let mut coalesced: Vec<TaggedContent> = Vec::new();
+
+        for item in content {
+            if let Some(previous) = coalesced.last_mut() {
+                if Self::can_coalesce_list_items(previous, &item) {
+                    Self::merge_tags(&mut previous.tags, &item.tags);
+                    assert!(
+                        previous.try_extend_span_end(item.span_end()),
+                        "adjacent list item spans must be extendable"
+                    );
+                    continue;
+                }
+            }
+
+            coalesced.push(item);
+        }
+
+        coalesced
+    }
+
+    fn can_coalesce_list_items(current: &TaggedContent, next: &TaggedContent) -> bool {
+        current.source_file == next.source_file
+            && current.date == next.date
+            && current.context == next.context
+            && current.section_one == next.section_one
+            && current.section_two == next.section_two
+            && current.before_first_h2 == next.before_first_h2
+            && current.raw_heading_line == next.raw_heading_line
+            && Self::starts_with_list_marker(current.raw_payload_content())
+            && Self::starts_with_list_marker(next.raw_payload_content())
+            && current.span_gap_to(next).is_some()
+    }
+
+    fn merge_tags(tags: &mut Vec<String>, additional: &[String]) {
+        for tag in additional {
+            if !tags.contains(tag) {
+                tags.push(tag.clone());
+            }
+        }
+    }
+
+    fn starts_with_list_marker(content: &str) -> bool {
+        let trimmed = content.trim_start();
+        let mut chars = trimmed.chars();
+
+        match chars.next() {
+            Some('-' | '*' | '+') => matches!(chars.next(), Some(' ' | '\t')),
+            Some(first) if first.is_ascii_digit() => {
+                let mut saw_marker = false;
+                for ch in chars {
+                    if ch.is_ascii_digit() {
+                        continue;
+                    }
+                    if ch == '.' || ch == ')' {
+                        saw_marker = true;
+                        continue;
+                    }
+                    return saw_marker && (ch == ' ' || ch == '\t');
+                }
+                false
+            }
+            _ => false,
+        }
     }
 
     fn section_one_label(item: &TaggedContent) -> String {
@@ -595,23 +661,44 @@ mod tests {
     }
 
     #[test]
-    fn test_to_markdown_separates_source_links_between_list_items() {
+    fn test_to_markdown_coalesces_adjacent_list_items_under_one_source_link() {
         let date = NaiveDate::from_ymd_opt(2025, 1, 15);
+        let source: Arc<str> = Arc::from("- bla\n- bla1\n- bla2");
+        let second_start = source.find("- bla1").unwrap();
+        let third_start = source.find("- bla2").unwrap();
         let content = vec![
             with_section_two(
-                create_test_content(vec!["work"], "- bla", "2025-01-15.md", date),
+                create_test_span_content(
+                    vec!["work"],
+                    Arc::clone(&source),
+                    SourceSpan::new(0, "- bla".len()),
+                    "2025-01-15.md",
+                    date,
+                ),
                 None,
                 Some("Work #work"),
                 false,
             ),
             with_section_two(
-                create_test_content(vec!["work"], "- bla1", "2025-01-15.md", date),
+                create_test_span_content(
+                    vec!["work"],
+                    Arc::clone(&source),
+                    SourceSpan::new(second_start, second_start + "- bla1".len()),
+                    "2025-01-15.md",
+                    date,
+                ),
                 None,
                 Some("Work #work"),
                 false,
             ),
             with_section_two(
-                create_test_content(vec!["work"], "- bla2", "2025-01-15.md", date),
+                create_test_span_content(
+                    vec!["work"],
+                    Arc::clone(&source),
+                    SourceSpan::new(third_start, third_start + "- bla2".len()),
+                    "2025-01-15.md",
+                    date,
+                ),
                 None,
                 Some("Work #work"),
                 false,
@@ -622,13 +709,12 @@ mod tests {
         let markdown = TagCompiler::to_markdown(content, &query);
 
         assert!(markdown.contains("_[source: 2025-01-15.md:1](2025-01-15.md#L1)_\n\n- bla"));
-        assert!(markdown.contains("_[source: 2025-01-15.md:1](2025-01-15.md#L1)_\n\n- bla1"));
-        assert!(markdown.contains("_[source: 2025-01-15.md:1](2025-01-15.md#L1)_\n\n- bla2"));
-        assert!(markdown.contains("- bla\n\n_[source: 2025-01-15.md:1](2025-01-15.md#L1)_"));
+        assert!(markdown.contains("- bla\n- bla1\n- bla2"));
+        assert_eq!(markdown.matches("_[source:").count(), 1);
     }
 
     #[test]
-    fn test_to_markdown_expands_tight_source_gap_before_source_links() {
+    fn test_to_markdown_coalesces_tight_list_items() {
         let date = NaiveDate::from_ymd_opt(2025, 1, 15);
         let source: Arc<str> = Arc::from("* first\n* second");
         let second_start = source.find("* second").unwrap();
@@ -663,7 +749,7 @@ mod tests {
         let markdown = TagCompiler::to_markdown(content, &query);
 
         assert!(markdown.contains("_[source: 2025-01-15.md:1](2025-01-15.md#L1)_\n\n* first"));
-        assert!(markdown.contains("_[source: 2025-01-15.md:2](2025-01-15.md#L2)_\n\n* second"));
-        assert!(markdown.contains("* first\n\n_[source: 2025-01-15.md:2](2025-01-15.md#L2)_"));
+        assert!(markdown.contains("* first\n* second"));
+        assert_eq!(markdown.matches("_[source:").count(), 1);
     }
 }
