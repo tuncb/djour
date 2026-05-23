@@ -404,6 +404,20 @@ mod tests {
         LOCK.get_or_init(|| Mutex::new(()))
     }
 
+    fn env_test_guard() -> std::sync::MutexGuard<'static, ()> {
+        env_test_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn canonical_path(path: &Path) -> PathBuf {
+        path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+    }
+
+    fn assert_same_path(actual: &Path, expected: &Path) {
+        assert_eq!(canonical_path(actual), canonical_path(expected));
+    }
+
     struct EnvVarRestore {
         key: &'static str,
         previous: Option<OsString>,
@@ -886,7 +900,7 @@ mod tests {
 
     #[test]
     fn test_discover_with_djour_root_env() {
-        let _env_lock = env_test_lock().lock().unwrap();
+        let _env_lock = env_test_guard();
         let _restore = EnvVarRestore::capture("DJOUR_ROOT");
 
         let temp = TempDir::new().unwrap();
@@ -899,12 +913,12 @@ mod tests {
         std::env::set_var("DJOUR_ROOT", temp.path());
 
         let repo = FileSystemRepository::discover().unwrap();
-        assert_eq!(repo.root, temp.path());
+        assert_same_path(&repo.root, temp.path());
     }
 
     #[test]
     fn test_discover_djour_root_not_initialized() {
-        let _env_lock = env_test_lock().lock().unwrap();
+        let _env_lock = env_test_guard();
         let _restore = EnvVarRestore::capture("DJOUR_ROOT");
 
         let temp = TempDir::new().unwrap();
@@ -928,7 +942,7 @@ mod tests {
 
     #[test]
     fn test_discover_without_djour_root_env() {
-        let _env_lock = env_test_lock().lock().unwrap();
+        let _env_lock = env_test_guard();
         let _restore = EnvVarRestore::capture("DJOUR_ROOT");
         let cwd = TempDir::new().unwrap();
         let _cwd_restore = CurrentDirRestore::capture().unwrap();
@@ -940,7 +954,7 @@ mod tests {
         let result = FileSystemRepository::discover();
 
         match result {
-            Err(DjourError::NotDjourDirectory(path)) => assert_eq!(path, cwd.path()),
+            Err(DjourError::NotDjourDirectory(path)) => assert_same_path(&path, cwd.path()),
             Ok(repo) => panic!(
                 "Expected NotDjourDirectory, but discovered {}",
                 repo.root.display()
@@ -951,7 +965,7 @@ mod tests {
 
     #[test]
     fn test_discover_prefers_current_dir_over_djour_root_env() {
-        let _env_lock = env_test_lock().lock().unwrap();
+        let _env_lock = env_test_guard();
         let _restore = EnvVarRestore::capture("DJOUR_ROOT");
 
         let current = TempDir::new().unwrap();
@@ -964,12 +978,12 @@ mod tests {
         std::env::set_var("DJOUR_ROOT", env_root.path());
 
         let repo = FileSystemRepository::discover().unwrap();
-        assert_eq!(repo.root, current.path());
+        assert_same_path(&repo.root, current.path());
     }
 
     #[test]
     fn test_discover_prefers_current_dir_over_invalid_djour_root_env() {
-        let _env_lock = env_test_lock().lock().unwrap();
+        let _env_lock = env_test_guard();
         let _restore = EnvVarRestore::capture("DJOUR_ROOT");
 
         let current = TempDir::new().unwrap();
@@ -981,6 +995,6 @@ mod tests {
         std::env::set_var("DJOUR_ROOT", invalid_env_root.path());
 
         let repo = FileSystemRepository::discover().unwrap();
-        assert_eq!(repo.root, current.path());
+        assert_same_path(&repo.root, current.path());
     }
 }
