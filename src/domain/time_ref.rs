@@ -1,5 +1,6 @@
 //! Time reference parsing and resolution
 
+use crate::domain::JournalMode;
 use crate::error::{DjourError, Result};
 use chrono::{Datelike, Duration, NaiveDate, Weekday};
 
@@ -18,6 +19,10 @@ pub enum TimeReference {
     LastWeekday(Weekday),
     /// Next occurrence of a weekday (strictly after today)
     NextWeekday(Weekday),
+    /// Relative day offset from today
+    DayOffset(i32),
+    /// Relative ISO week offset from the current week
+    WeekOffset(i32),
     /// Specific date
     SpecificDate(NaiveDate),
 }
@@ -31,6 +36,7 @@ impl TimeReference {
             "today" | "now" => Ok(TimeReference::Today),
             "yesterday" => Ok(TimeReference::Yesterday),
             "tomorrow" => Ok(TimeReference::Tomorrow),
+            "last week" => Ok(TimeReference::WeekOffset(-1)),
             "monday" => Ok(TimeReference::Weekday(Weekday::Mon)),
             "tuesday" => Ok(TimeReference::Weekday(Weekday::Tue)),
             "wednesday" => Ok(TimeReference::Weekday(Weekday::Wed)),
@@ -44,6 +50,12 @@ impl TimeReference {
             _ if normalized.starts_with("next ") => {
                 Self::parse_offset_weekday(&normalized[5..], TimeReference::NextWeekday)
             }
+            _ if normalized.starts_with("day ") => {
+                Self::parse_numbered_offset(input, &normalized[4..], TimeReference::DayOffset)
+            }
+            _ if normalized.starts_with("week ") => {
+                Self::parse_numbered_offset(input, &normalized[5..], TimeReference::WeekOffset)
+            }
             _ => {
                 // Try parsing as DD-MM-YYYY
                 NaiveDate::parse_from_str(&normalized, "%d-%m-%Y")
@@ -51,6 +63,39 @@ impl TimeReference {
                     .map_err(|_| DjourError::InvalidTimeReference(input.to_string()))
             }
         }
+    }
+
+    /// Return a required journal mode for time references that are mode-specific.
+    pub fn required_mode(&self) -> Option<JournalMode> {
+        match self {
+            TimeReference::DayOffset(_) => Some(JournalMode::Daily),
+            TimeReference::WeekOffset(_) => Some(JournalMode::Weekly),
+            _ => None,
+        }
+    }
+
+    /// Human-readable label for this time reference's mode-specific period.
+    pub fn period_name(&self) -> Option<&'static str> {
+        match self {
+            TimeReference::DayOffset(_) => Some("day"),
+            TimeReference::WeekOffset(_) => Some("week"),
+            _ => None,
+        }
+    }
+
+    fn parse_numbered_offset<F>(original: &str, number_str: &str, f: F) -> Result<Self>
+    where
+        F: FnOnce(i32) -> TimeReference,
+    {
+        let number_str = number_str.trim();
+        if number_str.is_empty() {
+            return Err(DjourError::InvalidTimeReference(original.to_string()));
+        }
+
+        number_str
+            .parse::<i32>()
+            .map(f)
+            .map_err(|_| DjourError::InvalidTimeReference(original.to_string()))
     }
 
     /// Helper to parse weekday names with offsets (last/next)
@@ -91,6 +136,8 @@ impl TimeReference {
             TimeReference::NextWeekday(target_day) => {
                 Self::find_weekday(base_date, *target_day, WeekdayOffset::Next)
             }
+            TimeReference::DayOffset(days) => base_date + Duration::days(i64::from(*days)),
+            TimeReference::WeekOffset(weeks) => base_date + Duration::weeks(i64::from(*weeks)),
             TimeReference::SpecificDate(date) => *date,
         }
     }
@@ -173,6 +220,42 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_day_offsets() {
+        assert_eq!(
+            TimeReference::parse("day +2").unwrap(),
+            TimeReference::DayOffset(2)
+        );
+        assert_eq!(
+            TimeReference::parse("day -2").unwrap(),
+            TimeReference::DayOffset(-2)
+        );
+        assert_eq!(
+            TimeReference::parse("day 0").unwrap(),
+            TimeReference::DayOffset(0)
+        );
+    }
+
+    #[test]
+    fn test_parse_week_offsets() {
+        assert_eq!(
+            TimeReference::parse("last week").unwrap(),
+            TimeReference::WeekOffset(-1)
+        );
+        assert_eq!(
+            TimeReference::parse("week +2").unwrap(),
+            TimeReference::WeekOffset(2)
+        );
+        assert_eq!(
+            TimeReference::parse("week -2").unwrap(),
+            TimeReference::WeekOffset(-2)
+        );
+        assert_eq!(
+            TimeReference::parse("week 0").unwrap(),
+            TimeReference::WeekOffset(0)
+        );
+    }
+
+    #[test]
     fn test_parse_weekdays() {
         assert_eq!(
             TimeReference::parse("monday").unwrap(),
@@ -219,6 +302,10 @@ mod tests {
         assert!(TimeReference::parse("32-01-2025").is_err()); // Invalid day
         assert!(TimeReference::parse("01-13-2025").is_err()); // Invalid month
         assert!(TimeReference::parse("last invalidday").is_err());
+        assert!(TimeReference::parse("day").is_err());
+        assert!(TimeReference::parse("day two").is_err());
+        assert!(TimeReference::parse("week").is_err());
+        assert!(TimeReference::parse("week two").is_err());
     }
 
     #[test]
@@ -239,6 +326,20 @@ mod tests {
         let base = NaiveDate::from_ymd_opt(2025, 1, 17).unwrap();
         let expected = NaiveDate::from_ymd_opt(2025, 1, 18).unwrap();
         assert_eq!(TimeReference::Tomorrow.resolve(base), expected);
+    }
+
+    #[test]
+    fn test_resolve_day_offset() {
+        let base = NaiveDate::from_ymd_opt(2025, 1, 17).unwrap();
+        let expected = NaiveDate::from_ymd_opt(2025, 1, 19).unwrap();
+        assert_eq!(TimeReference::DayOffset(2).resolve(base), expected);
+    }
+
+    #[test]
+    fn test_resolve_week_offset() {
+        let base = NaiveDate::from_ymd_opt(2025, 1, 17).unwrap();
+        let expected = NaiveDate::from_ymd_opt(2025, 1, 3).unwrap();
+        assert_eq!(TimeReference::WeekOffset(-2).resolve(base), expected);
     }
 
     #[test]

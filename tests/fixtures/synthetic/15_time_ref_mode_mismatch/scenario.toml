@@ -1,0 +1,4 @@
+[[command]]
+args = ["week", "-2"]
+expect_exit = 3
+stderr_contains = ["only valid in weekly mode"]

@@ -2,7 +2,7 @@
 
 #![allow(deprecated)]
 
-use chrono::Local;
+use chrono::{Datelike, Duration, Local};
 use predicates::prelude::*;
 use std::fs;
 use tempfile::TempDir;
@@ -151,4 +151,76 @@ fn test_time_ref_prints_absolute_note_path() {
         .assert()
         .success()
         .stdout(predicate::str::contains(expected));
+}
+
+#[test]
+fn test_day_offset_prints_absolute_note_path() {
+    let temp = TempDir::new().unwrap();
+
+    djour_cmd().arg("init").arg(temp.path()).assert().success();
+
+    let target = Local::now().date_naive() + Duration::days(2);
+    let expected = temp
+        .path()
+        .join(format!("{}.md", target.format("%Y-%m-%d")))
+        .display()
+        .to_string();
+
+    djour_cmd()
+        .current_dir(temp.path())
+        .arg("day")
+        .arg("+2")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(expected));
+}
+
+#[test]
+fn test_week_offset_prints_absolute_note_path_in_weekly_mode() {
+    let temp = TempDir::new().unwrap();
+
+    djour_cmd()
+        .arg("init")
+        .arg(temp.path())
+        .arg("--mode")
+        .arg("weekly")
+        .assert()
+        .success();
+
+    let target = Local::now().date_naive() - Duration::weeks(2);
+    let iso = target.iso_week();
+    let week_start = target - Duration::days(target.weekday().num_days_from_monday() as i64);
+    let expected = temp
+        .path()
+        .join(format!(
+            "{}-W{:02}-{}.md",
+            iso.year(),
+            iso.week(),
+            week_start.format("%Y-%m-%d")
+        ))
+        .display()
+        .to_string();
+
+    djour_cmd()
+        .current_dir(temp.path())
+        .arg("week")
+        .arg("-2")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(expected));
+}
+
+#[test]
+fn test_week_offset_fails_in_daily_mode() {
+    let temp = TempDir::new().unwrap();
+
+    djour_cmd().arg("init").arg(temp.path()).assert().success();
+
+    djour_cmd()
+        .current_dir(temp.path())
+        .arg("week")
+        .arg("-2")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("only valid in weekly mode"));
 }

@@ -223,7 +223,8 @@ fn run(cli: Cli) -> Result<(), DjourError> {
         }
         None => {
             // Check if time_ref provided (open command)
-            if let Some(time_ref) = cli.time_ref {
+            if !cli.time_ref.is_empty() {
+                let time_ref = cli.time_ref.join(" ");
                 // Resolve/create note and print filename
                 let repo = FileSystemRepository::discover()?;
                 let filename = open_note(&repo, &time_ref, cli.open)?;

@@ -12,6 +12,14 @@ pub enum DjourError {
     #[error("Invalid time reference: {0}")]
     InvalidTimeReference(String),
 
+    #[error("Time reference '{time_ref}' is only valid in {required_mode:?} mode, but current mode is {current_mode:?}")]
+    TimeReferenceModeMismatch {
+        time_ref: String,
+        required_mode: crate::domain::JournalMode,
+        current_mode: crate::domain::JournalMode,
+        period: &'static str,
+    },
+
     #[error("Tag not found: {0}")]
     TagNotFound(String),
 
@@ -39,7 +47,7 @@ impl DjourError {
     pub fn exit_code(&self) -> i32 {
         match self {
             DjourError::NotDjourDirectory(_) => 2,
-            DjourError::InvalidTimeReference(_) => 3,
+            DjourError::InvalidTimeReference(_) | DjourError::TimeReferenceModeMismatch { .. } => 3,
             DjourError::TagNotFound(_) => 4,
             _ => 1,
         }
@@ -65,12 +73,36 @@ impl DjourError {
                     • today, yesterday, tomorrow\n\
                     • monday, tuesday, ..., sunday (most recent)\n\
                     • last monday, next friday, etc.\n\
-                    • Specific dates: YYYY-MM-DD (e.g., 2025-01-17)\n\n\
+                    • day +2, day -2 (daily mode only)\n\
+                    • last week, week +2, week -2 (weekly mode only)\n\
+                    • Specific dates: DD-MM-YYYY (e.g., 17-01-2025)\n\n\
                     Examples:\n\
                     djour today\n\
                     djour last monday\n\
-                    djour 2025-01-15",
+                    djour day +2\n\
+                    djour week -2\n\
+                    djour 17-01-2025",
                     ref_str
+                )
+            }
+            DjourError::TimeReferenceModeMismatch {
+                time_ref,
+                required_mode,
+                current_mode,
+                period,
+            } => {
+                format!(
+                    "Time reference '{}' is only valid in {} mode, but current mode is {}.\n\n\
+                    Suggestions:\n\
+                    • Use this {} reference in a {} journal\n\
+                    • Change mode with 'djour config mode {}'\n\
+                    • Use a general time reference such as today, yesterday, tomorrow, a weekday, or a DD-MM-YYYY date",
+                    time_ref,
+                    format!("{:?}", required_mode).to_lowercase(),
+                    format!("{:?}", current_mode).to_lowercase(),
+                    period,
+                    format!("{:?}", required_mode).to_lowercase(),
+                    format!("{:?}", required_mode).to_lowercase()
                 )
             }
             DjourError::TagNotFound(tag) => {
@@ -140,9 +172,23 @@ mod tests {
         let err = DjourError::InvalidTimeReference("baddate".to_string());
         let msg = err.display_with_suggestions();
         assert!(msg.contains("today"));
-        assert!(msg.contains("YYYY-MM-DD"));
+        assert!(msg.contains("DD-MM-YYYY"));
         assert!(msg.contains("Examples"));
         assert!(msg.contains("djour today"));
+    }
+
+    #[test]
+    fn test_time_reference_mode_mismatch_suggestion() {
+        let err = DjourError::TimeReferenceModeMismatch {
+            time_ref: "week -2".to_string(),
+            required_mode: crate::domain::JournalMode::Weekly,
+            current_mode: crate::domain::JournalMode::Daily,
+            period: "week",
+        };
+        let msg = err.display_with_suggestions();
+        assert!(msg.contains("weekly mode"));
+        assert!(msg.contains("current mode is daily"));
+        assert!(msg.contains("djour config mode weekly"));
     }
 
     #[test]

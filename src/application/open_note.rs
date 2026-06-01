@@ -1,7 +1,7 @@
 //! Open note use case
 
 use crate::domain::{load_template, JournalMode, TimeReference};
-use crate::error::Result;
+use crate::error::{DjourError, Result};
 use crate::infrastructure::{EditorSession, FileSystemRepository, JournalRepository};
 use chrono::Local;
 
@@ -18,16 +18,28 @@ pub fn open_note(
     // 2. Parse time reference
     let time_ref = TimeReference::parse(time_ref_str)?;
 
-    // 3. Resolve to date
+    // 3. Validate mode-specific time references
+    let mode = config.get_mode();
+    if let Some(required_mode) = time_ref.required_mode() {
+        if mode != required_mode {
+            return Err(DjourError::TimeReferenceModeMismatch {
+                time_ref: time_ref_str.to_string(),
+                required_mode,
+                current_mode: mode,
+                period: time_ref.period_name().unwrap_or("time"),
+            });
+        }
+    }
+
+    // 4. Resolve to date
     let date = time_ref.resolve(Local::now().date_naive());
 
-    // 4. Generate filename based on mode
-    let mode = config.get_mode();
+    // 5. Generate filename based on mode
     let filename = mode.filename_for_date(date);
 
-    // 5. Check if file exists
+    // 6. Check if file exists
     if !repository.note_exists(&filename) {
-        // 6. Create file with template
+        // 7. Create file with template
         let template_name = mode.template_name();
         let template = load_template(repository.root(), template_name)?;
         let content = template.render(date);
@@ -48,7 +60,7 @@ pub fn open_note(
         }
     }
 
-    // 7. Open in editor when requested
+    // 8. Open in editor when requested
     if open_in_editor {
         let editor_cmd = config.get_editor();
         let editor = EditorSession::new(editor_cmd);
@@ -65,7 +77,38 @@ mod tests {
     use super::*;
     use crate::domain::JournalMode;
     use crate::infrastructure::Config;
+    use std::ffi::OsString;
+    use std::sync::{Mutex, OnceLock};
     use tempfile::TempDir;
+
+    fn env_test_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    struct EnvVarRestore {
+        key: &'static str,
+        previous: Option<OsString>,
+    }
+
+    impl EnvVarRestore {
+        fn capture(key: &'static str) -> Self {
+            Self {
+                key,
+                previous: std::env::var_os(key),
+            }
+        }
+    }
+
+    impl Drop for EnvVarRestore {
+        fn drop(&mut self) {
+            if let Some(value) = &self.previous {
+                std::env::set_var(self.key, value);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
 
     #[test]
     fn test_create_new_note_daily_mode() {
@@ -193,5 +236,83 @@ mod tests {
     fn test_parse_invalid_time_reference() {
         let result = TimeReference::parse("invaliddate");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_day_offset_requires_daily_mode() {
+        let _env_lock = env_test_lock().lock().unwrap();
+        let _restore = EnvVarRestore::capture("DJOUR_MODE");
+        std::env::remove_var("DJOUR_MODE");
+
+        let temp = TempDir::new().unwrap();
+        let repo = FileSystemRepository::new(temp.path().to_path_buf());
+
+        repo.initialize().unwrap();
+        repo.save_config(&Config::new(JournalMode::Weekly)).unwrap();
+
+        let result = open_note(&repo, "day +2", false);
+        assert!(matches!(
+            result,
+            Err(DjourError::TimeReferenceModeMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn test_week_offset_requires_weekly_mode() {
+        let _env_lock = env_test_lock().lock().unwrap();
+        let _restore = EnvVarRestore::capture("DJOUR_MODE");
+        std::env::remove_var("DJOUR_MODE");
+
+        let temp = TempDir::new().unwrap();
+        let repo = FileSystemRepository::new(temp.path().to_path_buf());
+
+        repo.initialize().unwrap();
+        repo.save_config(&Config::new(JournalMode::Daily)).unwrap();
+
+        let result = open_note(&repo, "week -2", false);
+        assert!(matches!(
+            result,
+            Err(DjourError::TimeReferenceModeMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn test_day_offset_creates_daily_note() {
+        let _env_lock = env_test_lock().lock().unwrap();
+        let _restore = EnvVarRestore::capture("DJOUR_MODE");
+        std::env::remove_var("DJOUR_MODE");
+
+        let temp = TempDir::new().unwrap();
+        let repo = FileSystemRepository::new(temp.path().to_path_buf());
+
+        repo.initialize().unwrap();
+        repo.save_config(&Config::new(JournalMode::Daily)).unwrap();
+
+        let date = Local::now().date_naive() + chrono::Duration::days(2);
+        let expected = JournalMode::Daily.filename_for_date(date);
+        let filename = open_note(&repo, "day +2", false).unwrap();
+
+        assert_eq!(filename, expected);
+        assert!(repo.note_exists(&expected));
+    }
+
+    #[test]
+    fn test_week_offset_creates_weekly_note() {
+        let _env_lock = env_test_lock().lock().unwrap();
+        let _restore = EnvVarRestore::capture("DJOUR_MODE");
+        std::env::remove_var("DJOUR_MODE");
+
+        let temp = TempDir::new().unwrap();
+        let repo = FileSystemRepository::new(temp.path().to_path_buf());
+
+        repo.initialize().unwrap();
+        repo.save_config(&Config::new(JournalMode::Weekly)).unwrap();
+
+        let date = Local::now().date_naive() - chrono::Duration::weeks(2);
+        let expected = JournalMode::Weekly.filename_for_date(date);
+        let filename = open_note(&repo, "week -2", false).unwrap();
+
+        assert_eq!(filename, expected);
+        assert!(repo.note_exists(&expected));
     }
 }

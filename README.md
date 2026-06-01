@@ -5,7 +5,7 @@ Terminal journal and notes application written in Rust.
 ## Main Features
 
 - Multiple journal modes: `daily`, `weekly`, `monthly`, `single`
-- Time references: `today`, `yesterday`, `tomorrow`, weekdays, `last <weekday>`, `next <weekday>`, specific dates
+- Time references: `today`, `yesterday`, `tomorrow`, weekdays, `last <weekday>`, `next <weekday>`, day/week offsets, specific dates
 - Tag-aware markdown notes with boolean tag queries
 - Compile tagged content into markdown reports
 - Convert one tag to another across notes
@@ -119,6 +119,8 @@ Accepted `TIME_REF` forms:
 - `today`, `yesterday`, `tomorrow`
 - `monday` ... `sunday`
 - `last monday`, `next friday`
+- `day +2`, `day -2`, `day 0` (daily mode only)
+- `last week`, `week +2`, `week -2`, `week 0` (weekly mode only)
 - Date in `DD-MM-YYYY` format, for example `17-01-2025`
 
 ### `init`

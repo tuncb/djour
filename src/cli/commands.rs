@@ -9,9 +9,9 @@ use std::path::PathBuf;
 #[command(version)]
 #[command(args_conflicts_with_subcommands = true)]
 pub struct Cli {
-    /// Time reference (e.g., today, yesterday, last monday, 17-01-2025)
-    #[arg(value_name = "TIME_REF")]
-    pub time_ref: Option<String>,
+    /// Time reference (e.g., today, yesterday, last monday, day +2, week -2, 17-01-2025)
+    #[arg(value_name = "TIME_REF", num_args = 1..=2, allow_hyphen_values = true)]
+    pub time_ref: Vec<String>,
 
     /// Open the selected note in configured editor
     #[arg(long, requires = "time_ref")]
@@ -167,15 +167,33 @@ mod tests {
     #[test]
     fn parses_time_ref_without_open_flag() {
         let cli = Cli::try_parse_from(["djour", "today"]).unwrap();
-        assert_eq!(cli.time_ref.as_deref(), Some("today"));
+        assert_eq!(cli.time_ref, vec!["today"]);
         assert!(!cli.open);
     }
 
     #[test]
     fn parses_open_flag_with_time_ref() {
         let cli = Cli::try_parse_from(["djour", "--open", "today"]).unwrap();
-        assert_eq!(cli.time_ref.as_deref(), Some("today"));
+        assert_eq!(cli.time_ref, vec!["today"]);
         assert!(cli.open);
+    }
+
+    #[test]
+    fn parses_two_word_time_ref() {
+        let cli = Cli::try_parse_from(["djour", "last", "week"]).unwrap();
+        assert_eq!(cli.time_ref, vec!["last", "week"]);
+    }
+
+    #[test]
+    fn parses_negative_time_ref_offset() {
+        let cli = Cli::try_parse_from(["djour", "week", "-2"]).unwrap();
+        assert_eq!(cli.time_ref, vec!["week", "-2"]);
+    }
+
+    #[test]
+    fn parses_positive_time_ref_offset() {
+        let cli = Cli::try_parse_from(["djour", "day", "+2"]).unwrap();
+        assert_eq!(cli.time_ref, vec!["day", "+2"]);
     }
 
     #[test]
