@@ -10,7 +10,7 @@ use std::path::PathBuf;
 #[command(args_conflicts_with_subcommands = true)]
 pub struct Cli {
     /// Time reference (e.g., today, yesterday, last monday, day +2, week -2, 17-01-2025)
-    #[arg(value_name = "TIME_REF", num_args = 1..=2, allow_hyphen_values = true)]
+    #[arg(value_name = "TIME_REF", num_args = 1..=2, allow_negative_numbers = true)]
     pub time_ref: Vec<String>,
 
     /// Open the selected note in configured editor
@@ -175,6 +175,13 @@ mod tests {
     fn parses_open_flag_with_time_ref() {
         let cli = Cli::try_parse_from(["djour", "--open", "today"]).unwrap();
         assert_eq!(cli.time_ref, vec!["today"]);
+        assert!(cli.open);
+    }
+
+    #[test]
+    fn parses_trailing_open_flag_with_two_word_time_ref() {
+        let cli = Cli::try_parse_from(["djour", "last", "week", "--open"]).unwrap();
+        assert_eq!(cli.time_ref, vec!["last", "week"]);
         assert!(cli.open);
     }
 
