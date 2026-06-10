@@ -8,7 +8,10 @@ use crate::error::{DjourError, Result};
 use crate::infrastructure::repository::JournalRepository;
 use crate::infrastructure::FileSystemRepository;
 use chrono::NaiveDate;
+use std::any::Any;
+use std::panic::{self, AssertUnwindSafe};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// Options for compilation
 #[derive(Debug, Clone)]
@@ -95,12 +98,14 @@ pub fn compile_tags(repository: &FileSystemRepository, options: CompileOptions) 
         }
 
         let file_path = PathBuf::from(&note.filename);
-        let tagged = TagParser::extract_from_markdown_for_output(
+        let tagged = extract_tagged_content_safely(
             &content,
             &file_path,
             note.date,
             output_context,
+            &options.query,
         );
+        let tagged = tagged?;
 
         let section_one =
             section_one_label_for_note(section_one_template.as_ref(), mode, note.date, &file_path);
@@ -148,6 +153,126 @@ fn load_section_one_template(
     }
 
     load_template(repo_root, mode.template_name()).map(Some)
+}
+
+fn extract_tagged_content_safely(
+    content: &str,
+    file_path: &std::path::Path,
+    date: Option<NaiveDate>,
+    output_context: Option<&std::path::Path>,
+    query: &str,
+) -> Result<Vec<TaggedContent>> {
+    with_parse_panic_context(file_path, content, query, || {
+        TagParser::extract_from_markdown_for_output(content, file_path, date, output_context)
+    })
+}
+
+fn with_parse_panic_context<T, F>(
+    file_path: &std::path::Path,
+    content: &str,
+    query: &str,
+    parse: F,
+) -> Result<T>
+where
+    F: FnOnce() -> T,
+{
+    let _panic_hook_guard = parse_panic_hook_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let captured_panic = Arc::new(Mutex::new(None::<String>));
+    let hook_capture = Arc::clone(&captured_panic);
+    let previous_hook = panic::take_hook();
+
+    panic::set_hook(Box::new(move |info| {
+        let mut message = panic_payload_message(info.payload());
+        if let Some(location) = info.location() {
+            message.push_str(&format!(" at {}:{}", location.file(), location.line()));
+        }
+        let mut capture = hook_capture
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *capture = Some(message);
+    }));
+
+    let parse_result = panic::catch_unwind(AssertUnwindSafe(parse));
+
+    panic::set_hook(previous_hook);
+
+    match parse_result {
+        Ok(tagged) => Ok(tagged),
+        Err(payload) => {
+            let captured = captured_panic
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone();
+            let message = captured.unwrap_or_else(|| panic_payload_message(payload.as_ref()));
+            Err(parse_error_for_file(
+                file_path,
+                content,
+                format!(
+                    "parser panicked while compiling query {:?}: {}",
+                    query, message
+                ),
+            ))
+        }
+    }
+}
+
+fn parse_panic_hook_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+fn panic_payload_message(payload: &(dyn Any + Send)) -> String {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        (*message).to_string()
+    } else if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+    } else {
+        "non-string panic payload".to_string()
+    }
+}
+
+fn parse_error_for_file(file_path: &std::path::Path, content: &str, message: String) -> DjourError {
+    let excerpt = source_excerpt(content);
+    DjourError::Parse {
+        file: file_path.to_path_buf(),
+        line: excerpt.focus_line,
+        message,
+        context: excerpt.context,
+    }
+}
+
+struct SourceExcerpt {
+    focus_line: Option<usize>,
+    context: String,
+}
+
+fn source_excerpt(content: &str) -> SourceExcerpt {
+    let lines: Vec<&str> = content.lines().collect();
+    if lines.is_empty() {
+        return SourceExcerpt {
+            focus_line: Some(1),
+            context: "   1 | ".to_string(),
+        };
+    }
+
+    let focus_idx = lines
+        .iter()
+        .position(|line| line.contains('#'))
+        .or_else(|| lines.iter().position(|line| !line.trim().is_empty()))
+        .unwrap_or(0);
+    let start = focus_idx.saturating_sub(2);
+    let end = (focus_idx + 3).min(lines.len());
+    let context = (start..end)
+        .map(|idx| format!("{:>4} | {}", idx + 1, lines[idx]))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    SourceExcerpt {
+        focus_line: Some(focus_idx + 1),
+        context,
+    }
 }
 
 fn section_one_label_for_note(
@@ -199,7 +324,7 @@ fn sanitize_filename(query: &str) -> String {
 mod tests {
     use super::*;
     use crate::domain::JournalMode;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn test_sanitize_filename() {
@@ -250,6 +375,41 @@ mod tests {
             section_one_label_for_note(None, JournalMode::Single, None, Path::new("journal.md"));
 
         assert_eq!(label.as_deref(), Some("journal.md"));
+    }
+
+    #[test]
+    fn test_source_excerpt_prefers_tagged_line() {
+        let excerpt = source_excerpt("Title\n\nBody #work\nNext line");
+
+        assert_eq!(excerpt.focus_line, Some(3));
+        assert!(excerpt.context.contains("   3 | Body #work"));
+        assert!(excerpt.context.contains("   4 | Next line"));
+    }
+
+    #[test]
+    fn test_parse_panic_is_reported_as_parse_error() {
+        let result = with_parse_panic_context(
+            Path::new("2025-01-15.md"),
+            "Title\n\nBody #work\n",
+            "work",
+            || -> Vec<TaggedContent> { panic!("synthetic parser failure") },
+        );
+
+        match result {
+            Err(DjourError::Parse {
+                file,
+                line,
+                message,
+                context,
+            }) => {
+                assert_eq!(file, PathBuf::from("2025-01-15.md"));
+                assert_eq!(line, Some(3));
+                assert!(message.contains("synthetic parser failure"));
+                assert!(message.contains("work"));
+                assert!(context.contains("Body #work"));
+            }
+            other => panic!("expected parse error, got {other:?}"),
+        }
     }
 
     // Integration tests would require setting up a FileSystemRepository with temp directories

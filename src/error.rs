@@ -23,6 +23,14 @@ pub enum DjourError {
     #[error("Tag not found: {0}")]
     TagNotFound(String),
 
+    #[error("Parse error in {}: {}", file.display(), message)]
+    Parse {
+        file: PathBuf,
+        line: Option<usize>,
+        message: String,
+        context: String,
+    },
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
@@ -116,6 +124,26 @@ impl DjourError {
                     tag
                 )
             }
+            DjourError::Parse {
+                file,
+                line,
+                message,
+                context,
+            } => {
+                let location = match line {
+                    Some(line) => format!("{}:{}", file.display(), line),
+                    None => file.display().to_string(),
+                };
+                format!(
+                    "Failed to parse tagged content in {}.\n\n\
+                    Context:\n{}\n\n\
+                    Reason: {}\n\n\
+                    Suggestions:\n\
+                    • Check the nearby Markdown heading, list, code fence, or front matter syntax\n\
+                    • If the Markdown looks valid, report this with the file and context above",
+                    location, context, message
+                )
+            }
             DjourError::Editor(msg) => {
                 format!(
                     "{}\n\n\
@@ -198,6 +226,22 @@ mod tests {
         assert!(msg.contains("djour list"));
         assert!(msg.contains("case-insensitive"));
         assert!(msg.contains("broader query"));
+    }
+
+    #[test]
+    fn test_parse_error_shows_file_context_and_reason() {
+        let err = DjourError::Parse {
+            file: PathBuf::from("2025-01-15.md"),
+            line: Some(5),
+            message: "parser panicked: test failure".to_string(),
+            context: "   5 | Button #work".to_string(),
+        };
+        let msg = err.display_with_suggestions();
+
+        assert!(msg.contains("2025-01-15.md:5"));
+        assert!(msg.contains("Button #work"));
+        assert!(msg.contains("parser panicked"));
+        assert!(msg.contains("Markdown"));
     }
 
     #[test]

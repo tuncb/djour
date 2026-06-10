@@ -1,7 +1,7 @@
 //! Tag parsing from markdown
 
 use chrono::NaiveDate;
-use pulldown_cmark::{CodeBlockKind, Event, Parser as MdParser, Tag, TagEnd};
+use pulldown_cmark::{CodeBlockKind, Event, Options, Parser as MdParser, Tag, TagEnd};
 use regex::Regex;
 use std::ffi::{OsStr, OsString};
 use std::path::{Component, Path, PathBuf};
@@ -237,6 +237,28 @@ fn rewrite_html_targets(html: &str, source_file: &Path, output_file: Option<&Pat
         .to_string()
 }
 
+fn parse_fence_marker(line: &str) -> Option<(char, usize)> {
+    let line = line.trim_end_matches(['\r', '\n']);
+    let trimmed = line.trim_start_matches(' ');
+    let leading_spaces = line.len().saturating_sub(trimmed.len());
+    if leading_spaces > 3 {
+        return None;
+    }
+
+    let mut chars = trimmed.chars();
+    let fence_char = chars.next()?;
+    if fence_char != '`' && fence_char != '~' {
+        return None;
+    }
+
+    let count = trimmed.chars().take_while(|c| *c == fence_char).count();
+    if count < 3 {
+        return None;
+    }
+
+    Some((fence_char, count))
+}
+
 fn rewrite_outside_fenced_code_blocks<F>(markdown: &str, mut rewrite_chunk: F) -> String
 where
     F: FnMut(&str) -> String,
@@ -364,47 +386,10 @@ fn trim_line_break_span(content: &str, mut start: usize, mut end: usize) -> (usi
     (start, end)
 }
 
-fn parse_atx_heading_level(line: &str) -> Option<usize> {
-    let line = line.trim_end_matches(['\r', '\n']);
-    let trimmed = line.trim_start_matches(' ');
-    let leading_spaces = line.len().saturating_sub(trimmed.len());
-    if leading_spaces > 3 {
-        return None;
-    }
-
-    let level = trimmed.chars().take_while(|c| *c == '#').count();
-    if level == 0 || level > 6 {
-        return None;
-    }
-
-    let rest = &trimmed[level..];
-    if !rest.starts_with(' ') && !rest.starts_with('\t') {
-        return None;
-    }
-
-    Some(level)
-}
-
-fn parse_fence_marker(line: &str) -> Option<(char, usize)> {
-    let line = line.trim_end_matches(['\r', '\n']);
-    let trimmed = line.trim_start_matches(' ');
-    let leading_spaces = line.len().saturating_sub(trimmed.len());
-    if leading_spaces > 3 {
-        return None;
-    }
-
-    let mut chars = trimmed.chars();
-    let fence_char = chars.next()?;
-    if fence_char != '`' && fence_char != '~' {
-        return None;
-    }
-
-    let count = trimmed.chars().take_while(|c| *c == fence_char).count();
-    if count < 3 {
-        return None;
-    }
-
-    Some((fence_char, count))
+fn markdown_options() -> Options {
+    let mut options = Options::empty();
+    options.insert(Options::ENABLE_YAML_STYLE_METADATA_BLOCKS);
+    options
 }
 
 #[derive(Debug, Clone)]
@@ -423,52 +408,99 @@ struct SectionBody {
     text: String,
 }
 
-fn heading_text_from_line(line: &str, level: usize) -> String {
-    let line = line.trim_end_matches(['\r', '\n']);
-    let trimmed = line.trim_start_matches(' ');
-    let rest = &trimmed[level..];
-    rest.trim_start_matches([' ', '\t']).to_string()
+fn first_source_line(content: &str, start: usize, end: usize) -> String {
+    content
+        .get(start.min(content.len())..end.min(content.len()))
+        .and_then(|source| source.lines().next())
+        .unwrap_or_default()
+        .trim_end_matches(['\r', '\n'])
+        .to_string()
 }
 
 fn collect_heading_infos(content: &str) -> Vec<HeadingInfo> {
-    let mut spans = Vec::new();
-    let mut offset = 0usize;
-    let mut active_fence: Option<(char, usize)> = None;
+    let mut headings = Vec::new();
+    let mut current_heading: Option<HeadingInfo> = None;
+    let mut inline_stack: Vec<InlineConstruct> = Vec::new();
 
-    for line in content.split_inclusive('\n') {
-        if let Some((fence_char, min_len)) = active_fence {
-            if let Some((marker_char, marker_len)) = parse_fence_marker(line) {
-                if marker_char == fence_char && marker_len >= min_len {
-                    active_fence = None;
+    for (event, range) in MdParser::new_ext(content, markdown_options()).into_offset_iter() {
+        match event {
+            Event::Start(Tag::Heading { level, .. }) => {
+                current_heading = Some(HeadingInfo {
+                    level: level as usize,
+                    line_start: range.start,
+                    line_end: range.end,
+                    raw_line: first_source_line(content, range.start, range.end),
+                    raw_text: String::new(),
+                });
+            }
+            Event::End(TagEnd::Heading(_)) => {
+                if let Some(mut heading) = current_heading.take() {
+                    heading.line_end = range.end;
+                    headings.push(heading);
                 }
             }
-
-            offset += line.len();
-            continue;
+            Event::Start(Tag::Link {
+                dest_url, title, ..
+            }) if current_heading.is_some() => {
+                if let Some(heading) = current_heading.as_mut() {
+                    heading.raw_text.push('[');
+                }
+                inline_stack.push(InlineConstruct::Link {
+                    destination: dest_url.to_string(),
+                    title: title.to_string(),
+                });
+            }
+            Event::End(TagEnd::Link) if current_heading.is_some() => {
+                if let Some(InlineConstruct::Link { destination, title }) = inline_stack.pop() {
+                    if let Some(heading) = current_heading.as_mut() {
+                        heading
+                            .raw_text
+                            .push_str(&link_or_image_tail(&destination, &title));
+                    }
+                }
+            }
+            Event::Start(Tag::Image {
+                dest_url, title, ..
+            }) if current_heading.is_some() => {
+                if let Some(heading) = current_heading.as_mut() {
+                    heading.raw_text.push_str("![");
+                }
+                inline_stack.push(InlineConstruct::Image {
+                    destination: dest_url.to_string(),
+                    title: title.to_string(),
+                });
+            }
+            Event::End(TagEnd::Image) if current_heading.is_some() => {
+                if let Some(InlineConstruct::Image { destination, title }) = inline_stack.pop() {
+                    if let Some(heading) = current_heading.as_mut() {
+                        heading
+                            .raw_text
+                            .push_str(&link_or_image_tail(&destination, &title));
+                    }
+                }
+            }
+            Event::Text(text) if current_heading.is_some() => {
+                if let Some(heading) = current_heading.as_mut() {
+                    heading.raw_text.push_str(&text);
+                }
+            }
+            Event::Code(code) if current_heading.is_some() => {
+                if let Some(heading) = current_heading.as_mut() {
+                    heading.raw_text.push('`');
+                    heading.raw_text.push_str(&code);
+                    heading.raw_text.push('`');
+                }
+            }
+            Event::SoftBreak | Event::HardBreak if current_heading.is_some() => {
+                if let Some(heading) = current_heading.as_mut() {
+                    heading.raw_text.push(' ');
+                }
+            }
+            _ => {}
         }
-
-        if let Some((fence_char, marker_len)) = parse_fence_marker(line) {
-            active_fence = Some((fence_char, marker_len));
-            offset += line.len();
-            continue;
-        }
-
-        if let Some(level) = parse_atx_heading_level(line) {
-            let line_start = offset;
-            let line_end = offset + line.len();
-            spans.push(HeadingInfo {
-                level,
-                line_start,
-                line_end,
-                raw_line: line.trim_end_matches(['\r', '\n']).to_string(),
-                raw_text: heading_text_from_line(line, level),
-            });
-        }
-
-        offset += line.len();
     }
 
-    spans
+    headings
 }
 
 fn extract_section_bodies_in_order(content: &str) -> Vec<SectionBody> {
@@ -885,7 +917,7 @@ impl TagParser {
         let mut pending_list_tags: Option<Vec<String>> = None;
 
         let source_arc: Arc<str> = Arc::from(content.to_string());
-        let parser = MdParser::new(content).into_offset_iter();
+        let parser = MdParser::new_ext(content, markdown_options()).into_offset_iter();
         let mut current_paragraph = String::new();
         let mut current_paragraph_span: Option<SourceSpan> = None;
         let mut in_paragraph = false;
@@ -2046,6 +2078,51 @@ Some content under the heading.
             TagContext::Section { level: 3, .. }
         ));
         assert_eq!(results[0].source_line_number(), 3);
+    }
+
+    #[test]
+    fn test_setext_heading_metadata_stays_aligned() {
+        let markdown = "Setext Work #work\n-----------------\n\nImportant detail.\n";
+        let results = TagParser::extract_from_markdown(markdown, Path::new("test.md"), None);
+
+        assert_eq!(results.len(), 1);
+        assert!(matches!(
+            results[0].context,
+            TagContext::Section { level: 2, .. }
+        ));
+        assert_eq!(results[0].section_two.as_deref(), Some("Setext Work #work"));
+        assert_eq!(results[0].source_line_number(), 1);
+        assert_eq!(results[0].content, "Important detail.");
+    }
+
+    #[test]
+    fn test_yaml_front_matter_is_not_treated_as_heading() {
+        let markdown = "---\ntitle: Button\n---\n\nBody #work\n";
+        let results = TagParser::extract_from_markdown(markdown, Path::new("test.md"), None);
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].context, TagContext::Paragraph);
+        assert_eq!(results[0].content, "Body #work");
+        assert_eq!(results[0].source_line_number(), 5);
+    }
+
+    #[test]
+    fn test_unusual_heading_forms_do_not_desync_metadata() {
+        let cases = [
+            "#\n\nBody #work\n",
+            "> # Quote #work\n> Body\n",
+            "- # Item #work\n  Body\n",
+        ];
+
+        for markdown in cases {
+            let results = TagParser::extract_from_markdown(markdown, Path::new("test.md"), None);
+            assert!(
+                results
+                    .iter()
+                    .any(|item| item.tags.contains(&"work".to_string())),
+                "expected at least one #work item for {markdown:?}"
+            );
+        }
     }
 
     #[test]
